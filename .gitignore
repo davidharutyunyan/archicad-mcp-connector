@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.devkit/
+addon/build*/
+*.log
+.DS_Store
+test/.tmp/
+coverage/
+addon/mdid.local.cmake
+addon/compile_commands.json
+addon/.cache/
