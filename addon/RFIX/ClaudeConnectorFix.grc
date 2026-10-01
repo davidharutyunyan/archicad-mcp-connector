@@ -1,0 +1,7 @@
+﻿#include "ClaudeConnectorMDID.h"
+
+/* Add-On identifier (Developer ID, Local ID) - configured in addon/mdid.local.cmake, see CMakeLists.txt. */
+'MDID' 32500 "Add-On Identifier" {
+	CC_MDID_DEVELOPER
+	CC_MDID_LOCAL
+}

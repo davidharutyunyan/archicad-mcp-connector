@@ -1,0 +1,4 @@
+﻿'STR#' 32000 "Add-on Name and Description" {
+/* [  1] */		"Claude Connector"
+/* [  2] */		"JSON command bridge that lets Claude (via the archicad-connector MCP server) read, create and modify everything in the Archicad project."
+}
