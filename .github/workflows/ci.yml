@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: MCP server (Node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node: [20, 22, 24]
+        include:
+          # macOS also runs the image tests that need `sips`.
+          - os: macos-latest
+            node: 24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: Tool reference is up to date
+        if: matrix.node == 24 && matrix.os == 'ubuntu-latest'
+        run: |
+          npm run docs:tools
+          git diff --exit-code -- docs/TOOLS.md || { echo "::error::docs/TOOLS.md is stale: run 'npm run docs:tools' and commit it"; exit 1; }
+
+  addon:
+    name: Archicad 26 add-on (macOS, universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the Archicad API DevKit
+        uses: actions/cache@v4
+        with:
+          path: .devkit/*.zip
+          key: archicad-devkit-26.3000
+      - name: Fetch the DevKit
+        run: bash scripts/fetch-devkit.sh
+      - name: Install Ninja
+        run: brew install ninja
+      - name: Configure
+        # No MDID in CI: the bundle builds, but licensed Archicad only loads builds with a Graphisoft-issued ID.
+        run: >
+          cmake -S addon -B addon/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DAC_API_DEVKIT_DIR="$PWD/.devkit/devkit26" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+      - name: Build
+        run: cmake --build addon/build
+      - name: Check the bundle
+        run: |
+          BIN=addon/build/ClaudeConnector.bundle/Contents/MacOS/ClaudeConnector
+          lipo -info "$BIN"
+          lipo "$BIN" -verify_arch arm64 x86_64
