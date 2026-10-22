@@ -17,6 +17,7 @@
 #include "Core/Command.hpp"
 #include "Core/Elements.hpp"
 #include "Core/Enums.hpp"
+#include "Core/Paths.hpp"
 #include "Core/Types.hpp"
 
 #include "FileSystem.hpp"
@@ -901,13 +902,8 @@ bool FileExists (const IO::Location& loc)
 IO::Location OutputLocation (const OS& params)
 {
 	const GS::UniString path = GetString (params, "path");
-#if defined (WINDOWS)
-	const bool absolute = path.GetLength () > 2 && (path[1] == ':' || path.BeginsWith ("\\\\"));
-#else
-	const bool absolute = path.BeginsWith (GS::UniChar ('/'));
-#endif
-	if (!absolute)
-		Fail ("'path' must be an absolute file path (e.g. /tmp/capture.png), got '" + path + "'.");
+	if (!IsAbsoluteFilePath (path))
+		Fail ("'path' must be an absolute file path (e.g. " + ExamplePath ("Pictures/capture.png") + "), got '" + path + "'.");
 	IO::Location loc (path);
 	if (loc.GetStatus () != NoError)
 		Fail ("Invalid path '" + path + "'.");

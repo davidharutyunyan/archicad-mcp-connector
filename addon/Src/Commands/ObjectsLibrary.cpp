@@ -27,6 +27,7 @@
 #include "Core/Elements.hpp"
 #include "Core/Enums.hpp"
 #include "Core/LibParts.hpp"
+#include "Core/Paths.hpp"
 #include "Core/Types.hpp"
 
 #include "BuiltInLibrary.hpp"
@@ -2542,12 +2543,8 @@ Int32 LibPartCount ()
 GS::UniString NormalizePath (GS::UniString path)
 {
 	path.Trim ();
-	if (path == "~" || path.BeginsWith ("~/")) {
-		const char* home = std::getenv ("HOME");
-		if (home != nullptr)
-			path = GS::UniString (home, CC_UTF8) + path.GetSubstring (1, path.GetLength () - 1);
-	}
-	while (path.GetLength () > 1 && path.EndsWith ('/'))
+	path = ExpandHome (path);
+	while (path.GetLength () > 1 && IsPathSeparator (path[path.GetLength () - 1]) && !(path.GetLength () == 3 && path[1] == ':'))
 		path.DeleteLast ();
 	return path;
 }
@@ -2604,8 +2601,8 @@ OS AddLibraries (const OS& params)
 	for (const GS::UniString& raw : paths) {
 		results.Push (Try ([&] () -> OS {
 			const GS::UniString path = NormalizePath (raw);
-			if (!path.BeginsWith ("/"))
-				Fail ("Library path must be absolute (e.g. /Users/me/Library Objects): '" + raw + "'.");
+			if (!IsAbsoluteFilePath (path))
+				Fail ("Library path must be absolute (e.g. " + ExamplePath ("Library Objects") + "): '" + raw + "'.");
 			IO::Location loc (path);
 			if (loc.GetStatus () != NoError)
 				Fail ("Invalid path '" + path + "'.");

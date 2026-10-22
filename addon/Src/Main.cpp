@@ -12,18 +12,28 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <cwchar>
 
 #define CLAUDE_CONNECTOR_NAME_RES_ID	32000
 
-// Startup diagnostics: ~/Library/Logs/ClaudeConnector.log
+// Startup diagnostics: ~/Library/Logs/ClaudeConnector.log (macOS), %LOCALAPPDATA%\ClaudeConnector.log (Windows)
 static void StartupLog (const char* message, GSErrCode err = NoError)
 {
+#if defined (WINDOWS)
+	wchar_t path[1024];
+	const DWORD length = GetEnvironmentVariableW (L"LOCALAPPDATA", path, 1000);
+	if (length == 0 || length >= 1000)
+		return;
+	wcscat (path, L"\\ClaudeConnector.log");
+	FILE* f = _wfopen (path, L"a");
+#else
 	const char* home = std::getenv ("HOME");
 	if (home == nullptr)
 		return;
 	char path[1024];
 	std::snprintf (path, sizeof (path), "%s/Library/Logs/ClaudeConnector.log", home);
 	FILE* f = std::fopen (path, "a");
+#endif
 	if (f == nullptr)
 		return;
 	std::time_t now = std::time (nullptr);

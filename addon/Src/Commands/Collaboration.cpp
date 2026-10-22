@@ -50,6 +50,7 @@
 #include "Core/Command.hpp"
 #include "Core/Elements.hpp"
 #include "Core/Enums.hpp"
+#include "Core/Paths.hpp"
 #include "Core/LibParts.hpp"
 #include "Core/Types.hpp"
 
@@ -135,13 +136,8 @@ IO::Location AbsoluteLocation (const GS::UniString& path, const char* key)
 {
 	if (path.IsEmpty ())
 		Fail ("'" + Key (key) + "' must not be empty.");
-#if defined (WINDOWS)
-	const bool absolute = path.GetLength () > 2 && (path[1] == ':' || path.BeginsWith ("\\\\"));
-#else
-	const bool absolute = path.BeginsWith (GS::UniChar ('/'));
-#endif
-	if (!absolute)
-		Fail ("'" + Key (key) + "' must be an absolute file path (e.g. /Users/me/Desktop/issues.bcfzip), got '" + path + "'.");
+	if (!IsAbsoluteFilePath (path))
+		Fail ("'" + Key (key) + "' must be an absolute file path (e.g. " + ExamplePath ("Desktop/issues.bcfzip") + "), got '" + path + "'.");
 	IO::Location loc (path);
 	if (loc.GetStatus () != NoError)
 		Fail ("Invalid path '" + path + "'.");
@@ -151,7 +147,7 @@ IO::Location AbsoluteLocation (const GS::UniString& path, const char* key)
 
 GS::UniString PathExtension (const GS::UniString& path)
 {
-	const UIndex slash = path.FindLast (GS::UniChar ('/'));
+	const UIndex slash = LastPathSeparator (path);
 	const UIndex dot = path.FindLast (GS::UniChar ('.'));
 	if (dot == MaxUIndex || (slash != MaxUIndex && dot < slash) || dot + 1 >= path.GetLength ())
 		return GS::UniString ();

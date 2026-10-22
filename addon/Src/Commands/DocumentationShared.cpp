@@ -4,6 +4,7 @@
 // *****************************************************************************
 
 #include "Commands/DocumentationShared.hpp"
+#include "Core/Paths.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -845,17 +846,6 @@ GS::UniString FromFsPath (const fs::path& p)
 }
 
 
-GS::UniString ExpandHome (const GS::UniString& path)
-{
-	if (path == "~" || path.BeginsWith ("~/")) {
-		const char* home = std::getenv ("HOME");
-		if (home != nullptr)
-			return GS::UniString (home, CC_UTF8) + path.GetSubstring (1, path.GetLength () - 1);
-	}
-	return path;
-}
-
-
 GS::UniString ParentOf (const GS::UniString& path)
 {
 	return FromFsPath (FsPath (path).parent_path ());
@@ -882,11 +872,7 @@ GS::UniString FileExtension (const GS::UniString& path)
 
 bool IsAbsolutePath (const GS::UniString& path)
 {
-#if defined (WINDOWS)
-	return path.GetLength () > 2 && (path[1] == ':' || path.BeginsWith ("\\\\"));
-#else
-	return path.BeginsWith (GS::UniChar ('/'));
-#endif
+	return IsAbsoluteFilePath (path);
 }
 
 
@@ -922,7 +908,7 @@ GS::UniString PrepareOutputPath (const OS& params, const char* key, const GS::Ar
 	if (path.IsEmpty ())
 		Fail ("'" + GS::UniString (key) + "' must not be empty.");
 	if (!IsAbsolutePath (path))
-		Fail ("'" + GS::UniString (key) + "' must be an absolute file path (e.g. /Users/me/Exports/model." + defaultExt + "), got '" + path + "'.");
+		Fail ("'" + GS::UniString (key) + "' must be an absolute file path (e.g. " + ExamplePath ("Exports/model.") + defaultExt + "), got '" + path + "'.");
 	if (path.EndsWith ("/") || IsDirectory (path))
 		Fail ("'" + path + "' is a folder; pass a full file path including the file name.");
 

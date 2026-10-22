@@ -23,6 +23,7 @@
 #include "Commands/ProjectShared.hpp"
 #include "Core/Command.hpp"
 #include "Core/Enums.hpp"
+#include "Core/Paths.hpp"
 #include "Core/Types.hpp"
 
 #include "FileSystem.hpp"
@@ -34,7 +35,9 @@
 #include <cstdio>
 #include <string>
 
-#if !defined (WINDOWS)
+#if defined (WINDOWS)
+#include <io.h>
+#else
 #include <unistd.h>
 #endif
 
@@ -102,7 +105,7 @@ GS::UniString LocationToPath (const IO::Location& loc)
 
 GS::UniString FileExtension (const GS::UniString& path)
 {
-	const UIndex slash = path.FindLast (GS::UniChar ('/'));
+	const UIndex slash = LastPathSeparator (path);
 	const UIndex dot = path.FindLast (GS::UniChar ('.'));
 	if (dot == MaxUIndex || (slash != MaxUIndex && dot < slash) || dot + 1 >= path.GetLength ())
 		return GS::UniString ();
@@ -131,18 +134,14 @@ bool LocationExists (const IO::Location& loc)
 
 bool IsAbsolutePath (const GS::UniString& path)
 {
-#if defined (WINDOWS)
-	return path.GetLength () > 2 && (path[1] == ':' || path.BeginsWith ("\\\\"));
-#else
-	return path.BeginsWith (GS::UniChar ('/'));
-#endif
+	return IsAbsoluteFilePath (path);
 }
 
 
 bool IsWritable (const GS::UniString& path)
 {
 #if defined (WINDOWS)
-	return true;
+	return ::_waccess (reinterpret_cast<const wchar_t*> (path.ToUStr ().Get ()), 2) == 0;	// 2 = write access
 #else
 	const GS::String p = ToStr (path);
 	return ::access (p.ToCStr (), W_OK) == 0;
@@ -155,7 +154,7 @@ IO::Location LocationFromPath (const GS::UniString& path, const char* key)
 	if (path.IsEmpty ())
 		Fail ("'" + GS::UniString (key) + "' must not be empty.");
 	if (!IsAbsolutePath (path))
-		Fail ("'" + GS::UniString (key) + "' must be an absolute path (e.g. /Users/me/Projects/House.pln), got '" + path + "'.");
+		Fail ("'" + GS::UniString (key) + "' must be an absolute path (e.g. " + ExamplePath ("Projects/House.pln") + "), got '" + path + "'.");
 	IO::Location loc (path);
 	if (loc.GetStatus () != NoError)
 		Fail ("Invalid path '" + path + "'.");
