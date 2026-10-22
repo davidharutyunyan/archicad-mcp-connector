@@ -45,6 +45,7 @@ Claude ──MCP(stdio)──> MCP server (TypeScript, src/)
 | `Polygon.hpp` | `GetPolygon`, `GetPolyline`, `WritePolygonToMemo`, `WritePolylineToMemo`, `PolygonToJson`, `PolylineToJson`, `SignedArea`, `NormalizeOrientation` |
 | `LibParts.hpp` | `FindLibPart`, `GetLibPartByIndex`, `LibPartToJson`, `LibTypeName`, `ParamsHandle`, `LoadDefaultParams`, `ParamsToJson`, `ApplyParamValues`, `ChangeParamsWithScript`, `ChangeParamsWithScriptForLibPart`, `ParamTypeName` |
 | `Enums.hpp` | `NamedValue`, `ParseNamed`, `OptNamed`, `NameOf` |
+| `Paths.hpp` | `IsAbsoluteFilePath`, `IsPathSeparator`, `LastPathSeparator`, `HomeFolder`, `ExpandHome`, `ExamplePath` (macOS and Windows path rules: use these, never check for `/` directly) |
 
 ## Patterns
 
@@ -89,6 +90,23 @@ defineTool(server, ctx, { name: "get_stories", title, description, input: {...zo
 * `Undoable` returns the error code to Archicad when `fn` throws, so the partial changes of a failed command are rolled back. Duplicate command names are skipped at registration (logged in ClaudeConnector.log).
 * zod input objects are not strict: unknown keys are silently dropped, so check field names against `mcp-call.ts --describe <tool>`.
 
+### Windows
+
+* The Archicad 25-27 headers (`GSRoot/Definitions.hpp`) `#error` on any compiler but Visual Studio 2019's (`_MSC_VER`
+  1920-1929): build with the **v142** toolset (`-T v142`; Visual Studio 2022/2026 install it as the component
+  *MSVC v142 - VS 2019 C++ x64/x86 build tools*). `scripts/windows/build-addon.ps1` picks an installation that has it.
+  On GitHub Actions the `windows-2025` image has it; the VS 2026 images (`windows-latest`) do not.
+* Compile flags follow the DevKit examples: `/Zc:wchar_t-` (GS uses `unsigned short` UTF-16), plus `/utf-8` for our
+  non-ASCII literals and `/bigobj` for the large command files. The resources compile with the DevKit's
+  `CompileResources.py` (cl preprocessor + ResConv + rc) from `RFIX.win/ClaudeConnector.rc2`; the `.res` is linked into
+  the `.apx`, which exports `GetExportedFuncAddrs` / `SetImportedFuncAddrs`.
+* `APIEnvir.h` pulls in `windows.h` (through `Win32Interface.hpp`, which undefines the worst macros such as `GetObject`,
+  `min`, `max`). Still defined: `near` and `far` (empty!), `IN`, `OUT`, `OPTIONAL`, `ERROR`, `ABSOLUTE`, `RELATIVE`,
+  `TRANSPARENT`, `OPAQUE` ... — never use them as identifiers (a parameter named `near` silently vanished).
+* Paths: `Core/Paths.hpp`. Environment values are read as UTF-16 (`GetEnvironmentVariableW`), so non-ASCII user names work.
+* Undo/redo drive the Cocoa Edit menu and are macOS-only (`ProjectEditMenu.inl.hpp` returns APIERR_NOTSUPPORTED on Windows).
+* MCP server: image downscaling uses `sips` on macOS and PowerShell + System.Drawing on Windows (`views-image.ts`).
+
 ## DevKit reference material
 
 * Headers: `.devkit/devkit26/Support/Inc/*.h` (`APIdefs_Elements.h` = all element structs, `APIdefs_Attributes.h`, `APIdefs_Environment.h`, `APIdefs_Database.h`, `APIdefs_Automate.h`, `APIdefs_Goodies.h`, `APIdefs_Interface.h`, `APIdefs_LibraryParts.h`, `APIdefs_Properties.h`, `APIdefs_Navigator.h`, `ACAPinc.h` = function list).
@@ -104,6 +122,9 @@ ninja -C addon/build-<family> CMakeFiles/AddOn.dir/Src/Commands/<File>.cpp.o
 
 # full build / install / restart Archicad (ONLY when you own the Archicad instance):
 bash scripts/dev-cycle.sh
+
+# Windows (PowerShell): build the x64 .apx, optionally copy it into Archicad's Add-Ons folder
+powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1 [-Install]
 
 # TypeScript
 npx tsc --noEmit

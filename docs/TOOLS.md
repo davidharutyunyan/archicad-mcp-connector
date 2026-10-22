@@ -439,7 +439,7 @@ Refreshes the current (front) window: 'Rebuild' (default, View > Refresh > Rebui
 
 ### `undo`
 
-Undos the last Archicad operation(s), exactly like Edit > Undo. Every connector create/modify tool call is ONE undo step (its name ends with '(Claude)'), so steps: 1 reverts one whole tool call. The Archicad 26 API has no undo function: this triggers Archicad's Edit menu item (macOS). Returns {performed, requested, undone (menu titles, e.g. 'Undo Create walls (Claude)'), next}. dryRun: true only reports what would be undone next. Note: undo also reverts changes made by the user or other tools.
+Undos the last Archicad operation(s), exactly like Edit > Undo. Every connector create/modify tool call is ONE undo step (its name ends with '(Claude)'), so steps: 1 reverts one whole tool call. The Archicad 26 API has no undo function: this triggers Archicad's Edit menu item (macOS only; not available on Windows). Returns {performed, requested, undone (menu titles, e.g. 'Undo Create walls (Claude)'), next}. dryRun: true only reports what would be undone next. Note: undo also reverts changes made by the user or other tools.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -449,7 +449,7 @@ Undos the last Archicad operation(s), exactly like Edit > Undo. Every connector 
 
 ### `redo`
 
-Redos the last undone Archicad operation(s), exactly like Edit > Redo. Every connector create/modify tool call is ONE undo step (its name ends with '(Claude)'), so steps: 1 reverts one whole tool call. The Archicad 26 API has no redo function: this triggers Archicad's Edit menu item (macOS). Returns {performed, requested, redone (menu titles, e.g. 'Redo Create walls (Claude)'), next}. dryRun: true only reports what would be redone next. Note: undo also reverts changes made by the user or other tools.
+Redos the last undone Archicad operation(s), exactly like Edit > Redo. Every connector create/modify tool call is ONE undo step (its name ends with '(Claude)'), so steps: 1 reverts one whole tool call. The Archicad 26 API has no redo function: this triggers Archicad's Edit menu item (macOS only; not available on Windows). Returns {performed, requested, redone (menu titles, e.g. 'Redo Create walls (Claude)'), next}. dryRun: true only reports what would be redone next. Note: undo also reverts changes made by the user or other tools.
 
 | Field | Type | Required | Description |
 |---|---|---|---|

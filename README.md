@@ -52,9 +52,10 @@ Claude ──MCP (stdio)──▶ archicad-connector (Node.js, src/)
 | | |
 |---|---|
 | Archicad | **26** (tested: 26.0.0 build 5002, Russian localization, macOS Intel). Any localization works. |
-| OS | macOS (Intel or Apple Silicon). The MCP server itself is cross-platform; the add-on build scripts are macOS-only (see *Windows*). |
+| OS | macOS (Intel or Apple Silicon) or Windows 10/11 (x64). The Windows add-on builds and links in CI but has not yet been tried in a running Windows Archicad. |
 | Node.js | **≥ 20** |
-| Add-on build | Xcode Command Line Tools (`xcode-select --install`), `cmake` and `ninja` (`brew install cmake ninja`), Python 3 |
+| Add-on build (macOS) | Xcode Command Line Tools (`xcode-select --install`), `cmake` and `ninja` (`brew install cmake ninja`), Python 3 |
+| Add-on build (Windows) | Visual Studio 2019, 2022 or 2026 (or its Build Tools) with the **v142** toolset (*MSVC v142 - VS 2019 C++ x64/x86 build tools*; the Archicad 26 headers accept no other compiler), CMake, Python 3 |
 | Graphisoft Developer ID | Required for the add-on to load in licensed Archicad — see [Add-on ID (MDID)](#add-on-id-mdid). |
 
 ## Installation
@@ -78,6 +79,17 @@ bash scripts/archicad.sh start     # starts Archicad with a fresh project from t
 
 `scripts/dev-cycle.sh` does build → stop → install → start in one go. Check the result with
 `bash scripts/archicad.sh status` (or the `archicad_status` tool): `commandCount` ≈ 170.
+
+**Windows** (PowerShell, from the repository folder; put your add-on ID into `addon\mdid.local.cmake` first):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1            # -> addon\build-win\Release\ClaudeConnector.apx
+powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1 -Install   # also copies it into Archicad's Add-Ons folder (run as administrator)
+```
+
+The script downloads the Windows DevKit (≈65 MB) into `.devkit\`, picks a Visual Studio installation that has the
+v142 toolset and builds the x64 add-on. Instead of `-Install` you can load the `.apx` from any
+folder with *Options › Add-On Manager › Edit List of Available Add-Ons › Add*. Restart Archicad afterwards.
 
 ### Add-on ID (MDID)
 
@@ -108,7 +120,8 @@ build with a borrowed ID.
 claude mcp add archicad -s user -- node /absolute/path/archicad-mcp-connector/dist/index.js
 ```
 
-**Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**Claude Desktop** — *Settings › Developer › Edit Config* opens `~/Library/Application Support/Claude/claude_desktop_config.json`
+(Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
 
 ```json
 {
@@ -122,7 +135,8 @@ claude mcp add archicad -s user -- node /absolute/path/archicad-mcp-connector/di
 }
 ```
 
-Use an absolute `node` path (e.g. `~/.nvm/versions/node/v24.x/bin/node`) — GUI apps do not see your shell's PATH.
+Use an absolute `node` path (e.g. `~/.nvm/versions/node/v24.x/bin/node`, on Windows `C:\\Program Files\\nodejs\\node.exe`
+with doubled backslashes in JSON) — GUI apps do not see your shell's PATH.
 Then open (or create) a project in Archicad — **the JSON API only listens while a project is open** — and ask Claude to
 run `archicad_status`.
 
@@ -186,7 +200,8 @@ Complete generated reference with every field: **[docs/TOOLS.md](docs/TOOLS.md)*
 
 ## Limitations (Archicad 26 API)
 
-* No native undo API — `undo`/`redo` trigger Archicad's Edit menu (macOS) and act on the whole undo history.
+* No native undo API — `undo`/`redo` trigger Archicad's Edit menu and act on the whole undo history. This is
+  implemented for macOS only; on Windows they report that they are not available.
 * No DWG writer in the API — `export_dwg` writes DXF (R12) and converts to DWG only with the ODA File Converter.
 * Zones: two automatic zones cannot share a room; a zone's reference point cannot be moved in place (the connector re-creates it).
 * Base lines of existing stairs, railings and curtain walls cannot be edited (re-create them); spline geometry is read-only after creation.
@@ -203,7 +218,7 @@ Complete generated reference with every field: **[docs/TOOLS.md](docs/TOOLS.md)*
 | Symptom | Fix |
 |---|---|
 | `No running Archicad found` | Open or create a project (the API listens only while a project is open). |
-| Add-on commands "not available" | `archicad_status` → `connectorAddOn`. Check the Add-On Manager: *authenticity cannot be verified* = missing/invalid MDID (see above). `~/Library/Logs/ClaudeConnector.log` shows whether the add-on initialized. |
+| Add-on commands "not available" | `archicad_status` → `connectorAddOn`. Check the Add-On Manager: *authenticity cannot be verified* = missing/invalid MDID (see above). `~/Library/Logs/ClaudeConnector.log` (Windows: `%LOCALAPPDATA%\ClaudeConnector.log`) shows whether the add-on initialized. |
 | Calls time out | A modal dialog is open in Archicad (answer it), or a long render/export is running. |
 | Archicad starts slowly after a crash | It recovers the autosave first (can take minutes). Crash reports: `~/Library/Logs/DiagnosticReports/Archicad-*.ips`. |
 | "Unrecognized key(s)" | Inputs are strict — fix the field name the error mentions. |
@@ -217,6 +232,7 @@ addon/Src/Core/          add-on framework: command registry, JSON helpers, eleme
 addon/Src/Commands/      one file (or prefix group) per family
 scripts/                 fetch-devkit, build/install add-on, archicad.sh start|stop|restart|status, dev-cycle, addon_manager.py,
                          mcp-call.ts (call any tool from the shell), gen-tool-reference.ts, sig.ts
+scripts/windows/         build-addon.ps1 (Windows build + install)
 test/unit/               vitest with a fake Archicad (npm test)
 test/live/               live suites against a running Archicad (npm run test:live — restarts Archicad on a fresh project)
 docs/                    CLAUDE_GUIDE.md, TOOLS.md (generated), DEVELOPING.md
@@ -225,12 +241,15 @@ examples/                worked examples with screenshots (two-story-house)
 ```
 
 * Call tools exactly like Claude does: `npx tsx scripts/mcp-call.ts create_walls '{"walls":[...]}'`.
-* **CI** (GitHub Actions, every push and pull request): typecheck, build and unit tests on Linux (Node 20 / 22 / 24)
-  and macOS, a check that `docs/TOOLS.md` is up to date, and a universal (arm64 + x86_64) build of the add-on
-  against the public Archicad 26 DevKit. The live suites need a running Archicad and stay local.
+* **CI** (GitHub Actions, every push and pull request): typecheck, build and unit tests on Linux (Node 20 / 22 / 24),
+  macOS and Windows, a check that `docs/TOOLS.md` is up to date, and builds of the add-on against the public
+  Archicad 26 DevKits: universal (arm64 + x86_64) for macOS and x64 for Windows (`scripts/windows/build-addon.ps1`,
+  v142 toolset). With the repository secrets `AC_MDID_DEVELOPER` / `AC_MDID_LOCAL` (your own Graphisoft add-on ID,
+  never a borrowed one) the builds carry that ID and are uploaded as workflow artifacts. The live suites need a
+  running Archicad and stay local.
 * Architecture, conventions, Core API and patterns for adding commands/tools: [docs/DEVELOPING.md](docs/DEVELOPING.md).
-* **Windows**: the MCP server runs unchanged; the add-on sources are portable C++ but the CMake file and scripts are
-  set up for macOS — port `addon/CMakeLists.txt` following the DevKit examples' `WIN32` branches and build with MSVC.
+* **Windows**: the MCP server runs unchanged (image downscaling uses PowerShell there); the add-on builds with
+  `scripts/windows/build-addon.ps1`. The live-test and Archicad control scripts (`scripts/*.sh`) are macOS-only.
 
 ## License
 

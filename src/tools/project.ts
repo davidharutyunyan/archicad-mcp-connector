@@ -734,7 +734,7 @@ export function registerProjectTools(server: McpServer, ctx: ToolContext): void 
       description:
         `${command}s the last ${name === "undo" ? "" : "undone "}Archicad operation(s), exactly like Edit > ${command}. Every connector ` +
         "create/modify tool call is ONE undo step (its name ends with '(Claude)'), so steps: 1 reverts one whole tool call. The Archicad 26 " +
-        `API has no ${name} function: this triggers Archicad's Edit menu item (macOS). Returns {performed, requested, ${name === "undo" ? "undone" : "redone"} ` +
+        `API has no ${name} function: this triggers Archicad's Edit menu item (macOS only; not available on Windows). Returns {performed, requested, ${name === "undo" ? "undone" : "redone"} ` +
         `(menu titles, e.g. '${command} Create walls (Claude)'), next}. dryRun: true only reports what would be ${name === "undo" ? "undone" : "redone"} next. ` +
         "Note: undo also reverts changes made by the user or other tools.",
       input: {

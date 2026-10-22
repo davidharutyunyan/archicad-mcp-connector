@@ -209,7 +209,10 @@ parameters later with `set_gdl_parameters`. Read existing parts' scripts with `g
   create the subset with custom numbering (§4.5) and `move_navigator_item` the layouts into it. A subset's numbering
   cannot be changed after creation.
 * **Text labels** (`create_labels` without a parent's auto text) are single-line unless you give `wrapWidth`.
-* **Undo/redo** use Archicad's Edit menu (the AC26 API has none): they act on the whole undo history.
+* **Undo/redo** use Archicad's Edit menu (the AC26 API has none): they act on the whole undo history, and they work on
+  macOS only (on Windows they report that they are not available — fix mistakes with modify/delete calls instead).
+* **Paths** are absolute paths on the Archicad machine: `/Users/me/Desktop/plan.pdf` on macOS,
+  `C:\Users\me\Desktop\plan.pdf` on Windows.
 * **Render**: `render_view` uses the CineRender engine; if it returns a blank image (warning in the result) use `capture_view` of the 3D window.
 * **DWG**: Archicad 26's API cannot write DWG; `export_dwg` writes DXF (any CAD opens it) and converts to .dwg only if the ODA File Converter is installed.
 * **Stairs, railings, curtain walls**: their base line/path cannot be changed after creation (re-create them); curtain wall grids need at least one flexible module (default: the first).
