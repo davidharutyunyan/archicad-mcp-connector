@@ -502,7 +502,7 @@ describe("capture_view", () => {
     expect(res.text).toContain("absolute path");
   });
 
-  it.skipIf(process.platform !== "darwin")("downscales large pictures to maxSize (macOS sips)", async () => {
+  it.skipIf(process.platform !== "darwin" && process.platform !== "win32")("downscales large pictures to maxSize (sips / PowerShell)", async () => {
     const h = await route({
       CaptureView: (req) => {
         writeFileSync(String(req.addOnParameters?.["path"]), makePng(400, 200));
@@ -517,7 +517,7 @@ describe("capture_view", () => {
     expect(res.json).toMatchObject({ image: { width: 100, height: 50, resized: true, originalWidth: 400, originalHeight: 200 } });
   });
 
-  it.skipIf(process.platform !== "darwin")("uses width/height as the image bounds for 2D windows", async () => {
+  it.skipIf(process.platform !== "darwin" && process.platform !== "win32")("uses width/height as the image bounds for 2D windows", async () => {
     const h = await route({
       CaptureView: (req) => {
         writeFileSync(String(req.addOnParameters?.["path"]), makePng(300, 100));

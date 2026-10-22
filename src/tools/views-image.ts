@@ -1,6 +1,6 @@
 /**
  * Image helpers for the view tools (capture_view / render_view):
- * temp file paths, PNG/JPEG size sniffing, downscaling (macOS `sips`) and cleanup.
+ * temp file paths, PNG/JPEG size sniffing, downscaling (macOS `sips`, Windows PowerShell + System.Drawing) and cleanup.
  *
  * Archicad writes the picture to a file (APIDo_SaveID / APIDo_PhotoRenderID); the MCP server reads it,
  * shrinks it when needed and returns it as MCP image content.
@@ -91,18 +91,71 @@ function mimeOf(format: ImageFormat): string {
 
 function run(cmd: string, args: string[], timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: timeoutMs }, (err) => (err ? reject(err) : resolve()));
+    execFile(cmd, args, { timeout: timeoutMs, windowsHide: true }, (err) => (err ? reject(err) : resolve()));
   });
 }
 
-/** Downscales (and optionally converts) an image with macOS `sips`. Throws when sips is unavailable. */
+/**
+ * Windows: resizes with System.Drawing (.NET Framework, part of every Windows 10/11 PowerShell 5.1).
+ * The parameters arrive as a script-block call so paths never pass through command-line quoting.
+ */
+const PS_RESIZE = `& {
+param([string]$src, [string]$dst, [int]$max, [string]$fmt, [int]$q)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+$img = [System.Drawing.Image]::FromFile($src)
+try {
+  $scale = [Math]::Min(1.0, $max / [double][Math]::Max($img.Width, $img.Height))
+  $w = [Math]::Max(1, [int][Math]::Round($img.Width * $scale))
+  $h = [Math]::Max(1, [int][Math]::Round($img.Height * $scale))
+  $bmp = New-Object System.Drawing.Bitmap $w, $h
+  try {
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $g.DrawImage($img, 0, 0, $w, $h)
+    $g.Dispose()
+    if ($fmt -eq 'jpeg') {
+      $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+      $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
+      $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]$q)
+      $bmp.Save($dst, $codec, $ep)
+    } else {
+      $bmp.Save($dst, [System.Drawing.Imaging.ImageFormat]::Png)
+    }
+  } finally { $bmp.Dispose() }
+} finally { $img.Dispose() }
+}`;
+
+/** Single-quoted PowerShell string literal. */
+const psQuote = (s: string): string => `'${s.replace(/'/g, "''")}'`;
+
+/** powershell.exe arguments that resize `src` into `dst` (longest side `side` px). Exported for tests. */
+export function powershellResizeArgs(src: string, dst: string, side: number, format: ImageFormat, quality: number): string[] {
+  const command = `${PS_RESIZE} ${psQuote(src)} ${psQuote(dst)} ${side} ${psQuote(format)} ${quality}`;
+  return ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(command, "utf16le").toString("base64")];
+}
+
+/**
+ * Downscales (and optionally converts) an image so that its longest side is at most `maxSide`:
+ * macOS `sips`, Windows PowerShell + System.Drawing. Throws on other platforms.
+ */
 export async function resizeImage(src: string, dst: string, maxSide: number, format: ImageFormat, quality: number): Promise<void> {
-  if (process.platform !== "darwin") throw new Error("image resizing needs macOS 'sips'");
-  const args = ["-Z", String(Math.max(16, Math.round(maxSide)))];
-  if (format === "jpeg") args.push("-s", "format", "jpeg", "-s", "formatOptions", String(Math.min(100, Math.max(1, Math.round(quality)))));
-  else args.push("-s", "format", "png");
-  args.push(src, "--out", dst);
-  await run("sips", args, 60_000);
+  const side = Math.max(16, Math.round(maxSide));
+  const q = Math.min(100, Math.max(1, Math.round(quality)));
+  if (process.platform === "darwin") {
+    const args = ["-Z", String(side)];
+    if (format === "jpeg") args.push("-s", "format", "jpeg", "-s", "formatOptions", String(q));
+    else args.push("-s", "format", "png");
+    args.push(src, "--out", dst);
+    await run("sips", args, 60_000);
+    return;
+  }
+  if (process.platform === "win32") {
+    await run("powershell.exe", powershellResizeArgs(src, dst, side, format, q), 60_000);
+    return;
+  }
+  throw new Error("image resizing needs macOS 'sips' or Windows PowerShell");
 }
 
 export interface LoadOptions {
