@@ -222,9 +222,9 @@ ArcGeometry GetArcGeometry (const API_Element& e)
 }
 
 
-API_Coord PointOnArc (const ArcGeometry& g, const API_Coord& near)
+API_Coord PointOnArc (const ArcGeometry& g, const API_Coord& nearPoint)	// not 'near': an (empty) macro in windows.h
 {
-	const Vec v = Sub (V (near), V (g.center));
+	const Vec v = Sub (V (nearPoint), V (g.center));
 	if (Len (v) < 1e-9)
 		Fail ("'at' must not be the arc center: give a point near the arc where the dimension should touch it.");
 	return C (Add (V (g.center), Mul (Unit (v), g.radius)));
@@ -441,9 +441,9 @@ AngleGeometry ComputeAngleGeometry (const API_Coord (&p)[4])
 		Fail ("The two lines are parallel; an angle dimension needs two non-parallel lines.");
 	const double s = Cross (Sub (V (p[2]), V (p[0])), d2) / cr;
 	g.origo = C (Add (V (p[0]), Mul (d1, s)));
-	auto far = [&] (const API_Coord& a, const API_Coord& b) { return Dist (a, g.origo) >= Dist (b, g.origo) ? a : b; };
-	g.ray1 = Unit (Sub (V (far (p[0], p[1])), V (g.origo)));
-	g.ray2 = Unit (Sub (V (far (p[2], p[3])), V (g.origo)));
+	auto farther = [&] (const API_Coord& a, const API_Coord& b) { return Dist (a, g.origo) >= Dist (b, g.origo) ? a : b; };
+	g.ray1 = Unit (Sub (V (farther (p[0], p[1])), V (g.origo)));
+	g.ray2 = Unit (Sub (V (farther (p[2], p[3])), V (g.origo)));
 	return g;
 }
 
