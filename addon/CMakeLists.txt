@@ -6,6 +6,10 @@ cmake_minimum_required (VERSION 3.16)
 #   cmake -S addon -B addon/build -G Ninja -DCMAKE_BUILD_TYPE=Release
 #   cmake --build addon/build
 # The bundle is produced at addon/build/ClaudeConnector.bundle
+# Build (Windows, Visual Studio 2019 or newer; scripts/windows/build-addon.ps1 does all of this):
+#   cmake -S addon -B addon/build -A x64 -DAC_API_DEVKIT_DIR=<DevKit for Windows>
+#   cmake --build addon/build --config Release
+# The add-on is produced at addon/build/Release/ClaudeConnector.apx
 # -----------------------------------------------------------------------------
 
 set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -46,6 +50,7 @@ set (AddOnSourcesFolder ${CMAKE_CURRENT_LIST_DIR}/Src)
 set (AddOnResourcesFolder ${CMAKE_CURRENT_LIST_DIR})
 set (ResourceObjectsDir ${CMAKE_BINARY_DIR}/ResourceObjects)
 set (BundleDir ${CMAKE_BINARY_DIR}/${AC_ADDON_NAME}.bundle)
+set (ResourceFile "${ResourceObjectsDir}/${AC_ADDON_NAME}.res")	# Windows: compiled native resources, linked into the .apx
 
 # --- Add-on identifier (MDID) ------------------------------------------------
 # Licensed Archicad only loads add-ons whose MDID (Developer ID + Local ID) was issued by Graphisoft:
@@ -74,24 +79,47 @@ file (COPY_FILE "${MDID_HEADER}.tmp" "${MDID_HEADER}" ONLY_IF_DIFFERENT)
 
 # --- Resources ---------------------------------------------------------------
 
-find_program (PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
+if (WIN32)
+	# FindPython3 skips the Microsoft Store 'python.exe' alias, which is not a real interpreter.
+	find_package (Python3 REQUIRED COMPONENTS Interpreter)
+	set (PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+else ()
+	find_program (PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
+endif ()
 
-file (GLOB AddOnResourceFiles
-	${AddOnResourcesFolder}/R${AC_ADDON_LANGUAGE}/*.grc
-	${AddOnResourcesFolder}/RFIX/*.grc
-	${AddOnResourcesFolder}/RFIX.mac/*.plist
-)
-
-add_custom_command (
-	OUTPUT "${ResourceObjectsDir}/AddOnResources.stamp"
-	DEPENDS ${AddOnResourceFiles} "${MDID_HEADER}"
-	COMMENT "Compiling resources..."
-	COMMAND ${CMAKE_COMMAND} -E make_directory "${ResourceObjectsDir}"
-	COMMAND ${CMAKE_COMMAND} -E make_directory "${BundleDir}/Contents/Resources"
-	COMMAND ${PYTHON_EXECUTABLE} "${AC_API_DEVKIT_DIR}/Support/Tools/CompileResources.py" "${AC_ADDON_LANGUAGE}" "${AC_API_DEVKIT_DIR}" "${ResourceIncludeDir}" "${AddOnResourcesFolder}" "${ResourceObjectsDir}" "${BundleDir}/Contents/Resources"
-	COMMAND ${CMAKE_COMMAND} -E copy "${AC_API_DEVKIT_DIR}/Support/Inc/PkgInfo" "${BundleDir}/Contents/PkgInfo"
-	COMMAND ${CMAKE_COMMAND} -E touch "${ResourceObjectsDir}/AddOnResources.stamp"
-)
+if (WIN32)
+	file (GLOB AddOnResourceFiles
+		${AddOnResourcesFolder}/R${AC_ADDON_LANGUAGE}/*.grc
+		${AddOnResourcesFolder}/RFIX/*.grc
+		${AddOnResourcesFolder}/RFIX.win/*.rc2
+	)
+	# CompileResources.py runs cl (preprocessor) and rc: the Visual Studio generator puts both on the PATH of
+	# custom build steps; with Ninja, configure from a Visual Studio developer prompt.
+	add_custom_command (
+		OUTPUT "${ResourceObjectsDir}/AddOnResources.stamp"
+		DEPENDS ${AddOnResourceFiles} "${MDID_HEADER}"
+		COMMENT "Compiling resources..."
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${ResourceObjectsDir}"
+		COMMAND "${PYTHON_EXECUTABLE}" "${AC_API_DEVKIT_DIR}/Support/Tools/CompileResources.py" "${AC_ADDON_LANGUAGE}" "${AC_API_DEVKIT_DIR}" "${ResourceIncludeDir}" "${AddOnResourcesFolder}" "${ResourceObjectsDir}" "${ResourceFile}"
+		COMMAND ${CMAKE_COMMAND} -E touch "${ResourceObjectsDir}/AddOnResources.stamp"
+	)
+else ()
+	file (GLOB AddOnResourceFiles
+		${AddOnResourcesFolder}/R${AC_ADDON_LANGUAGE}/*.grc
+		${AddOnResourcesFolder}/RFIX/*.grc
+		${AddOnResourcesFolder}/RFIX.mac/*.plist
+	)
+	add_custom_command (
+		OUTPUT "${ResourceObjectsDir}/AddOnResources.stamp"
+		DEPENDS ${AddOnResourceFiles} "${MDID_HEADER}"
+		COMMENT "Compiling resources..."
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${ResourceObjectsDir}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${BundleDir}/Contents/Resources"
+		COMMAND ${PYTHON_EXECUTABLE} "${AC_API_DEVKIT_DIR}/Support/Tools/CompileResources.py" "${AC_ADDON_LANGUAGE}" "${AC_API_DEVKIT_DIR}" "${ResourceIncludeDir}" "${AddOnResourcesFolder}" "${ResourceObjectsDir}" "${BundleDir}/Contents/Resources"
+		COMMAND ${CMAKE_COMMAND} -E copy "${AC_API_DEVKIT_DIR}/Support/Inc/PkgInfo" "${BundleDir}/Contents/PkgInfo"
+		COMMAND ${CMAKE_COMMAND} -E touch "${ResourceObjectsDir}/AddOnResources.stamp"
+	)
+endif ()
 add_custom_target (AddOnResources ALL DEPENDS "${ResourceObjectsDir}/AddOnResources.stamp" SOURCES ${AddOnResourceFiles})
 
 # --- Sources -----------------------------------------------------------------
@@ -99,28 +127,53 @@ add_custom_target (AddOnResources ALL DEPENDS "${ResourceObjectsDir}/AddOnResour
 file (GLOB_RECURSE AddOnHeaderFiles CONFIGURE_DEPENDS ${AddOnSourcesFolder}/*.h ${AddOnSourcesFolder}/*.hpp)
 file (GLOB_RECURSE AddOnSourceFiles CONFIGURE_DEPENDS ${AddOnSourcesFolder}/*.cpp)
 
-add_library (AddOn MODULE ${AddOnHeaderFiles} ${AddOnSourceFiles})
-set_target_properties (AddOn PROPERTIES
-	# The GS frameworks must resolve (via @rpath) to the ones inside the running Archicad.app,
-	# never to the DevKit copies, so no build-tree RPATH may be embedded.
-	SKIP_BUILD_RPATH TRUE
-	INSTALL_RPATH ""
-	OUTPUT_NAME ${AC_ADDON_NAME}
-	BUNDLE TRUE
-	MACOSX_BUNDLE_INFO_PLIST "${AddOnResourcesFolder}/RFIX.mac/Info.plist"
-	LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-)
+if (WIN32)
+	# Archicad loads a Windows add-on as a DLL with the .apx extension and the two exported entry points below.
+	add_library (AddOn SHARED ${AddOnHeaderFiles} ${AddOnSourceFiles})
+	set_target_properties (AddOn PROPERTIES
+		OUTPUT_NAME ${AC_ADDON_NAME}
+		SUFFIX ".apx"
+	)
+	target_link_options (AddOn PRIVATE "${ResourceFile}" /export:GetExportedFuncAddrs,@1 /export:SetImportedFuncAddrs,@2)
+else ()
+	add_library (AddOn MODULE ${AddOnHeaderFiles} ${AddOnSourceFiles})
+	set_target_properties (AddOn PROPERTIES
+		# The GS frameworks must resolve (via @rpath) to the ones inside the running Archicad.app,
+		# never to the DevKit copies, so no build-tree RPATH may be embedded.
+		SKIP_BUILD_RPATH TRUE
+		INSTALL_RPATH ""
+		OUTPUT_NAME ${AC_ADDON_NAME}
+		BUNDLE TRUE
+		MACOSX_BUNDLE_INFO_PLIST "${AddOnResourcesFolder}/RFIX.mac/Info.plist"
+		LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+	)
+endif ()
 
 target_include_directories (AddOn PUBLIC
 	${AddOnSourcesFolder}
 	${AC_API_DEVKIT_DIR}/Support/Inc
 )
 
-find_library (CocoaFramework Cocoa)
-target_link_libraries (AddOn "${AC_API_DEVKIT_DIR}/Support/Lib/Mactel/libACAP_STAT.a" ${CocoaFramework})
-
 target_compile_features (AddOn PUBLIC cxx_std_17)
-target_compile_options (AddOn PUBLIC -Wall -Wextra -fvisibility=hidden
+if (WIN32)
+	target_link_libraries (AddOn
+		"$<$<CONFIG:Debug>:${AC_API_DEVKIT_DIR}/Support/Lib/Win/ACAP_STATD.lib>"
+		"$<$<NOT:$<CONFIG:Debug>>:${AC_API_DEVKIT_DIR}/Support/Lib/Win/ACAP_STAT.lib>"
+	)
+	# /Zc:wchar_t- as in the DevKit examples (the GS modules are built with wchar_t as a typedef);
+	# /utf-8: the sources are UTF-8 (Cyrillic and other non-ASCII literals); /bigobj: large command files.
+	target_compile_options (AddOn PUBLIC /W3 /Zc:wchar_t- /utf-8 /bigobj /EHsc /MP
+		/wd4996		# deprecated CRT / API functions
+		/wd4068		# unknown pragma
+		/wd4244		# conversion, possible loss of data
+		/wd4267		# size_t conversion
+		/wd4305		# truncation from double to float
+	)
+	target_compile_definitions (AddOn PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS $<$<CONFIG:Debug>:DEBUG>)
+else ()
+	find_library (CocoaFramework Cocoa)
+	target_link_libraries (AddOn "${AC_API_DEVKIT_DIR}/Support/Lib/Mactel/libACAP_STAT.a" ${CocoaFramework})
+	target_compile_options (AddOn PUBLIC -Wall -Wextra -fvisibility=hidden
 	-Wno-multichar
 	-Wno-ctor-dtor-privacy
 	-Wno-invalid-offsetof
@@ -145,13 +198,17 @@ target_compile_options (AddOn PUBLIC -Wall -Wextra -fvisibility=hidden
 	-Wno-nontrivial-memcall
 	-Wno-cast-function-type-mismatch
 	-Wno-unknown-warning-option
-)
+	)
+endif ()
 add_dependencies (AddOn AddOnResources)
 
-# Link every GS module framework shipped with the DevKit (same as the official examples).
+# Link every GS module shipped with the DevKit (same as the official examples):
+# macOS: Support/Frameworks/<module>.framework, Windows: Support/Modules/<folder>/Win/<module>Imp.lib.
 function (GetModuleNameFromModuleFolderName module folder)
 	if (${folder} MATCHES "^.*Lib$")
 		string (REGEX REPLACE "^(.*)Lib$" "\\1" result ${folder})
+	elseif (WIN32 AND ${folder} MATCHES "^Communication.*$")
+		string (REGEX REPLACE "^Communication(.*)$" "Communication.\\1" result ${folder})
 	else ()
 		set (result ${folder})
 	endif ()
@@ -163,7 +220,11 @@ foreach (folder ${GSModuleDirs})
 	if (IS_DIRECTORY "${AC_API_DEVKIT_DIR}/Support/Modules/${folder}")
 		target_include_directories (AddOn PUBLIC "${AC_API_DEVKIT_DIR}/Support/Modules/${folder}")
 		GetModuleNameFromModuleFolderName (module ${folder})
-		set (ModuleLibPath "${AC_API_DEVKIT_DIR}/Support/Frameworks/${module}.framework")
+		if (WIN32)
+			set (ModuleLibPath "${AC_API_DEVKIT_DIR}/Support/Modules/${folder}/Win/${module}Imp.lib")
+		else ()
+			set (ModuleLibPath "${AC_API_DEVKIT_DIR}/Support/Frameworks/${module}.framework")
+		endif ()
 		if (EXISTS ${ModuleLibPath})
 			target_link_libraries (AddOn ${ModuleLibPath})
 		endif ()

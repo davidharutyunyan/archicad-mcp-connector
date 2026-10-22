@@ -1,0 +1,7 @@
+// Native Windows resources of the Claude Connector add-on (compiled by the DevKit's CompileResources.py with rc.exe).
+// The two .grc.rc2 files are generated from RINT/ClaudeConnector.grc and RFIX/ClaudeConnectorFix.grc.
+
+#include "ClaudeConnector.grc.rc2"
+#include "ClaudeConnectorFix.grc.rc2"
+
+1	ICON	LOADONCALL MOVEABLE IMPURE	ACAP.ico
