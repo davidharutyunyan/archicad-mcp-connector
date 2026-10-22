@@ -7,6 +7,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { addonOk, harness, type RecordedRequest } from "../helpers.js";
 
+// The fake ODA File Converters below are POSIX shell scripts, which Windows cannot execute.
+const noPosixShell = process.platform === "win32";
+
 // The DWG converter lookup is mocked so that the tests do not depend on what is installed on this machine.
 const dwgMocks = vi.hoisted(() => ({ converter: undefined as string | undefined }));
 vi.mock("../../src/tools/documentation-dwg.js", async (importOriginal) => {
@@ -306,7 +309,7 @@ describe("export_dwg", () => {
     expect(h.requests).toHaveLength(0);
   });
 
-  it("converts the DXF to DWG with the converter and cleans up", async () => {
+  it.skipIf(noPosixShell)("converts the DXF to DWG with the converter and cleans up", async () => {
     // Fake ODA File Converter: <in> <out> <version> <type> <recurse> <audit> <filter> -> copies <in>/<filter> to <out>/<name>.dwg
     const fake = join(scratch, "fake-oda.sh");
     await writeFile(fake, '#!/bin/sh\nname=$(basename "$7" .dxf)\ncp "$1/$7" "$2/$name.dwg"\n');
@@ -372,7 +375,7 @@ describe("documentation-dwg helpers", () => {
     expect(existsSync(join(scratch, "new-folder", "deep"))).toBe(true);
   });
 
-  it("convertDxfToDwg runs the converter and copies the result", async () => {
+  it.skipIf(noPosixShell)("convertDxfToDwg runs the converter and copies the result", async () => {
     const fake = join(scratch, "fake-oda2.sh");
     await writeFile(fake, '#!/bin/sh\n[ "$3" = "ACAD2013" ] || exit 3\nname=$(basename "$7" .dxf)\ncp "$1/$7" "$2/$name.dwg"\n');
     await chmod(fake, 0o755);
@@ -386,7 +389,7 @@ describe("documentation-dwg helpers", () => {
     expect(existsSync(work.root)).toBe(false);
   });
 
-  it("convertDxfToDwg reports converter failures and missing output", async () => {
+  it.skipIf(noPosixShell)("convertDxfToDwg reports converter failures and missing output", async () => {
     const failing = join(scratch, "fail-oda.sh");
     await writeFile(failing, "#!/bin/sh\necho boom >&2\nexit 2\n");
     await chmod(failing, 0o755);

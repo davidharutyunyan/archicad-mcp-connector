@@ -23,8 +23,10 @@ jobs:
         os: [ubuntu-latest]
         node: [20, 22, 24]
         include:
-          # macOS also runs the image tests that need `sips`.
+          # macOS and Windows also run the image-resizing tests (sips / PowerShell).
           - os: macos-latest
+            node: 24
+          - os: windows-latest
             node: 24
     steps:
       - uses: actions/checkout@v7
@@ -45,9 +47,15 @@ jobs:
           npm run docs:tools
           git diff --exit-code -- docs/TOOLS.md || { echo "::error::docs/TOOLS.md is stale: run 'npm run docs:tools' and commit it"; exit 1; }
 
-  addon:
+  # The add-on ID (MDID) is read from the repository secrets AC_MDID_DEVELOPER / AC_MDID_LOCAL. Without them the
+  # add-ons are built with a placeholder ID (licensed Archicad would not load them) and no artifact is uploaded.
+  # Never store a borrowed ID there: the artifacts are downloadable by anyone who can see the workflow runs.
+  addon-macos:
     name: Archicad 26 add-on (macOS, universal)
     runs-on: macos-latest
+    env:
+      AC_MDID_DEVELOPER: ${{ secrets.AC_MDID_DEVELOPER }}
+      AC_MDID_LOCAL: ${{ secrets.AC_MDID_LOCAL }}
     steps:
       - uses: actions/checkout@v7
       - name: Cache the Archicad API DevKit
@@ -60,10 +68,11 @@ jobs:
       - name: Install Ninja
         run: brew install ninja
       - name: Configure
-        # No MDID in CI: the bundle builds, but licensed Archicad only loads builds with a Graphisoft-issued ID.
-        run: >
-          cmake -S addon -B addon/build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DAC_API_DEVKIT_DIR="$PWD/.devkit/devkit26" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: |
+          MDID=()
+          if [[ -n "$AC_MDID_DEVELOPER" && -n "$AC_MDID_LOCAL" ]]; then MDID=(-DAC_MDID_DEVELOPER="$AC_MDID_DEVELOPER" -DAC_MDID_LOCAL="$AC_MDID_LOCAL"); fi
+          cmake -S addon -B addon/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DAC_API_DEVKIT_DIR="$PWD/.devkit/devkit26" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" "${MDID[@]}"
       - name: Build
         run: cmake --build addon/build
       - name: Check the bundle
@@ -71,3 +80,49 @@ jobs:
           BIN=addon/build/ClaudeConnector.bundle/Contents/MacOS/ClaudeConnector
           lipo -info "$BIN"
           lipo "$BIN" -verify_arch arm64 x86_64
+      - name: Upload the add-on
+        if: env.AC_MDID_DEVELOPER != '' && env.AC_MDID_LOCAL != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ClaudeConnector-macOS-universal
+          path: addon/build/ClaudeConnector.bundle
+
+  addon-windows:
+    name: Archicad 26 add-on (Windows, x64)
+    # Archicad 26 add-ons need the Visual Studio 2019 toolset (v142): windows-2025 ships Visual Studio 2022 with it,
+    # the newer Visual Studio 2026 images do not.
+    runs-on: windows-2025
+    env:
+      AC_MDID_DEVELOPER: ${{ secrets.AC_MDID_DEVELOPER }}
+      AC_MDID_LOCAL: ${{ secrets.AC_MDID_LOCAL }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Cache the Archicad API DevKit
+        uses: actions/cache@v6
+        with:
+          path: .devkit/*.zip
+          key: archicad-devkit-win-26.3000
+      - name: Build (scripts/windows/build-addon.ps1)
+        shell: pwsh
+        run: ./scripts/windows/build-addon.ps1 -MdidDeveloper "$env:AC_MDID_DEVELOPER" -MdidLocal "$env:AC_MDID_LOCAL"
+      - name: Check the add-on
+        shell: pwsh
+        run: |
+          $apx = "addon\build-win\Release\ClaudeConnector.apx"
+          $bytes = [IO.File]::ReadAllBytes($apx)
+          $machine = [BitConverter]::ToUInt16($bytes, [BitConverter]::ToInt32($bytes, 0x3C) + 4)
+          if ($machine -ne 0x8664) { throw ("Not an x64 binary (machine 0x{0:X})" -f $machine) }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1
+          $exports = & $dumpbin.FullName /exports $apx | Out-String
+          foreach ($entry in "GetExportedFuncAddrs", "SetImportedFuncAddrs") {
+            if ($exports -notmatch $entry) { throw "The add-on does not export $entry" }
+          }
+          & $dumpbin.FullName /dependents $apx | Select-String "\.dll"
+          Write-Host ("x64 add-on with both Archicad entry points, {0:N0} bytes" -f (Get-Item $apx).Length)
+      - name: Upload the add-on
+        if: env.AC_MDID_DEVELOPER != '' && env.AC_MDID_LOCAL != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ClaudeConnector-Windows-x64
+          path: addon/build-win/Release/ClaudeConnector.apx
