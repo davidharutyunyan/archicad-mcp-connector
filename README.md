@@ -3,7 +3,7 @@
 [![CI](https://github.com/davidharutyunyan/archicad-mcp-connector/actions/workflows/ci.yml/badge.svg)](https://github.com/davidharutyunyan/archicad-mcp-connector/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**An MCP server that gives Claude full read/write control of Graphisoft Archicad 26** — model, draft, annotate, query,
+**An MCP server that gives Claude full read/write control of Graphisoft Archicad 26, 27, 28 and 29** — model, draft, annotate, query,
 document, export and manage BIM data in a live project, and *see* the result through captured views.
 
 * **~260 tools in 21 families**: stories, attributes, walls, columns, beams, slabs, roofs, shells, meshes, morphs, curtain
@@ -14,8 +14,12 @@ document, export and manage BIM data in a live project, and *see* the result thr
 * **Built for an LLM**: meters & degrees everywhere, batched calls (one undo step each), per-item results, strict input
   validation that names wrong fields, actionable error messages, localized-name lookups and `capture_view` so Claude can
   verify its work visually.
-* **Verified live** against Archicad 26 (build 5002): 574 unit tests + a live regression of 413 checks across all
-  families (`npm run test:live`).
+* **One add-on source for Archicad 26–29** on macOS and Windows: the version differences of the C API (reorganized in
+  Archicad 27, new C++ element APIs in 29) are bridged inside the add-on, the MCP server adapts to the version it is
+  connected to. See [Archicad versions](#archicad-versions).
+* **Verified live** against Archicad 26 (build 5002, macOS) and Archicad 29 (build 3100, Windows 11): unit tests + live
+  regression suites across all families (`npm run test:live`); the Archicad 27 and 28 builds compile and link against
+  the official DevKits in CI.
 
 > **Claude: read [`docs/CLAUDE_GUIDE.md`](docs/CLAUDE_GUIDE.md)** (also returned by the `get_connector_guide` tool) before
 > building or editing anything. It contains the conventions, the working loop, recipes and the known limits.
@@ -38,24 +42,24 @@ plumbing plans and published a 17-sheet plan book. Full walkthrough: **[examples
 Claude ──MCP (stdio)──▶ archicad-connector (Node.js, src/)
                             │  HTTP JSON  →  http://127.0.0.1:19723  (Archicad's JSON API, ports 19723-19744)
                             ▼
-                     Archicad 26 ── official API.* commands (elements, properties, classifications, navigator, layouts...)
+                Archicad 26-29 ── official API.* commands (elements, properties, classifications, navigator, layouts...)
                                 └─ API.ExecuteAddOnCommand → "ClaudeConnector" add-on (C++, addon/)
                                      create/modify every element type, views & images, exports, GDL, Teamwork, BCF ...
 ```
 
 * The **MCP server** (`src/`) exposes typed tools (zod schemas → JSON Schema) and talks to Archicad over HTTP.
-* The **Claude Connector add-on** (`addon/`, C++ against the Archicad 26 API DevKit) implements ~170 JSON commands the
+* The **Claude Connector add-on** (`addon/`, C++ against the Archicad 26–29 API DevKits) implements ~170 JSON commands the
   official API lacks. Without the add-on only the official-API tools work (`archicad_status` tells you which).
 
 ## Requirements
 
 | | |
 |---|---|
-| Archicad | **26** (tested: 26.0.0 build 5002, Russian localization, macOS Intel). Any localization works. |
-| OS | macOS (Intel or Apple Silicon) or Windows 10/11 (x64). The Windows add-on builds and links in CI but has not yet been tried in a running Windows Archicad. |
+| Archicad | **26, 27, 28 or 29** — one add-on build per version (tested live: 26.0.0 build 5002 Russian on macOS, 29.0 build 3100 international on Windows 11). Any localization works. |
+| OS | macOS (Intel or Apple Silicon) or Windows 10/11 (x64; Windows on ARM runs the x64 Archicad and add-on under emulation). |
 | Node.js | **≥ 20** |
 | Add-on build (macOS) | Xcode Command Line Tools (`xcode-select --install`), `cmake` and `ninja` (`brew install cmake ninja`), Python 3 |
-| Add-on build (Windows) | Visual Studio 2019, 2022 or 2026 (or its Build Tools) with the **v142** toolset (*MSVC v142 - VS 2019 C++ x64/x86 build tools*; the Archicad 26 headers accept no other compiler), CMake, Python 3 |
+| Add-on build (Windows) | Visual Studio 2019, 2022 or 2026 (or its Build Tools) with the toolset the Archicad headers demand: **v142** for Archicad 26–28 (*MSVC v142 - VS 2019 C++ x64/x86 build tools*), **v143** (Visual Studio 2022) for Archicad 29; CMake, Python 3 |
 | Graphisoft Developer ID | Required for the add-on to load in licensed Archicad — see [Add-on ID (MDID)](#add-on-id-mdid). |
 
 ## Installation
@@ -69,11 +73,12 @@ npm run build                      # MCP server -> dist/
 ### 1. Build and install the add-on
 
 ```bash
-bash scripts/fetch-devkit.sh       # downloads Graphisoft's official Archicad 26 API DevKit (≈170 MB) into .devkit/
+export ARCHICAD_VERSION=26         # 26 (default), 27, 28 or 29: the scripts below build for and control that version
+bash scripts/fetch-devkit.sh       # downloads Graphisoft's official API DevKit of that version (≈170 MB) into .devkit/
 # put your add-on ID into addon/mdid.local.cmake first (next section)
 bash scripts/archicad.sh stop      # Archicad must be closed while the add-on is registered
-bash scripts/build-addon.sh        # -> addon/build/ClaudeConnector.bundle
-bash scripts/install-addon.sh      # copies it to ~/Library/ClaudeConnector/AC26/ and registers it in the Add-On Manager
+bash scripts/build-addon.sh        # -> addon/build/ClaudeConnector.bundle (Archicad 26), addon/build-ac<version>/ (others)
+bash scripts/install-addon.sh      # copies it to ~/Library/ClaudeConnector/AC<version>/ and registers it in the Add-On Manager
 bash scripts/archicad.sh start     # starts Archicad with a fresh project from the default template
 ```
 
@@ -83,12 +88,12 @@ bash scripts/archicad.sh start     # starts Archicad with a fresh project from t
 **Windows** (PowerShell, from the repository folder; put your add-on ID into `addon\mdid.local.cmake` first):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1            # -> addon\build-win\Release\ClaudeConnector.apx
-powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1 -Install   # also copies it into Archicad's Add-Ons folder (run as administrator)
+powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1 -ArchicadVersion 29            # -> addon\build-win-ac29\Release\ClaudeConnector.apx
+powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1 -ArchicadVersion 29 -Install   # also copies it into Archicad's Add-Ons folder (run as administrator)
 ```
 
-The script downloads the Windows DevKit (≈65 MB) into `.devkit\`, picks a Visual Studio installation that has the
-v142 toolset and builds the x64 add-on. Instead of `-Install` you can load the `.apx` from any
+`-ArchicadVersion` is 26 (default), 27, 28 or 29. The script downloads that Windows DevKit (≈65 MB) into `.devkit\`,
+picks a Visual Studio installation that has the right toolset (v142 for 26–28, v143 for 29) and builds the x64 add-on. Instead of `-Install` you can load the `.apx` from any
 folder with *Options › Add-On Manager › Edit List of Available Add-Ons › Add*. Restart Archicad afterwards.
 
 ### Add-on ID (MDID)
@@ -137,6 +142,16 @@ claude mcp add archicad -s user -- node /absolute/path/archicad-mcp-connector/di
 
 Use an absolute `node` path (e.g. `~/.nvm/versions/node/v24.x/bin/node`, on Windows `C:\\Program Files\\nodejs\\node.exe`
 with doubled backslashes in JSON) — GUI apps do not see your shell's PATH.
+
+**Archicad in a Windows virtual machine** (Parallels on a Mac): install Node.js and this repository inside Windows
+(`npm install && npm run build`), then let Claude on the Mac start the server in the VM through Parallels' command
+line, which keeps the stdio connection:
+
+```bash
+claude mcp add archicad-windows -s user -- prlctl exec "Windows 11" --current-user "C:\Program Files\nodejs\node.exe" 'C:\Users\<you>\archicad-mcp-connector\dist\index.js'
+```
+
+(`"Windows 11"` is the VM name from `prlctl list -a`; in Claude Desktop use the same `command` / `args`.)
 Then open (or create) a project in Archicad — **the JSON API only listens while a project is open** — and ask Claude to
 run `archicad_status`.
 
@@ -198,14 +213,32 @@ Complete generated reference with every field: **[docs/TOOLS.md](docs/TOOLS.md)*
 | collaboration | Teamwork status/send/receive/reserve/release, issues (comments, attachments) + BCF import/export, favorites, tool defaults, revisions |
 | official | typed wrappers of the official JSON API: element lists/types/bounding boxes/components, classifications, navigator tree & items, layouts, attribute folders, publisher sets, pen tables, profile previews |
 
-## Limitations (Archicad 26 API)
+## Archicad versions
+
+The same tools work on every supported version; where the Archicad API itself differs, this is what changes:
+
+| | Archicad 26 | 27 | 28 | 29 |
+|---|---|---|---|---|
+| Attribute folders | Layers, composites, profiles, surfaces, building materials | every attribute type except pens, fonts, dimension standards, model view options (the folder tools switch to the GUID-based official commands automatically) | ← | ← |
+| Pens, fonts, dimension standards, model view options | attributes | own API — still listed as attribute types by `get_attributes` / `modify_attributes` | ← | ← |
+| IFC data (`get_ifc_data`) | ✓ | ✓ | ✓ | ✓ read through the new IFC API |
+| Storing IFC properties / attributes / classification references (`set_ifc_properties`) | ✓ | ✓ | ✓ | ✗ removed from the API: store Archicad properties / classifications and map them in the IFC translator |
+| Opening tool | host fixed | ← | ← | new Opening API: `modify_openings {owner}` moves an opening to another host, `cutElements` / `addCutElements` / `removeCutElements` let one opening cut several elements |
+| MEP systems as attributes | ✓ | ✓ | ✓ | none (Archicad 29 replaced them by MEP system groups) |
+| Save as previous version (`save_project_as {format: "previous"}`) | pln25 | pln26 | pln27 | pln28 |
+| ifcXML export | ✓ | ✗ | ✗ | ✗ |
+
+New official JSON API commands of a version (e.g. `API.GetAttributesIndices` in 28) are always reachable through
+`execute_json_api_command`. `archicad_status` reports the connected version.
+
+## Limitations
 
 * No native undo API — `undo`/`redo` trigger Archicad's Edit menu and act on the whole undo history. This is
   implemented for macOS only; on Windows they report that they are not available.
 * No DWG writer in the API — `export_dwg` writes DXF (R12) and converts to DWG only with the ODA File Converter.
 * Zones: two automatic zones cannot share a room; a zone's reference point cannot be moved in place (the connector re-creates it).
 * Base lines of existing stairs, railings and curtain walls cannot be edited (re-create them); spline geometry is read-only after creation.
-* Openings cannot be placed in polygonal walls; an opening's host cannot be changed.
+* Openings cannot be placed in polygonal walls; before Archicad 29 an opening's host cannot be changed.
 * `render_view` depends on CineRender; if Cineware crashes on the machine it returns a blank image (flagged in the result) — `capture_view` still works.
 * Project open/close/quit end the API connection until a project is open again.
 * GDL dictionary parameters are not accessible; library part creation cannot check GDL syntax.
@@ -243,8 +276,8 @@ examples/                worked examples with screenshots (two-story-house)
 * Call tools exactly like Claude does: `npx tsx scripts/mcp-call.ts create_walls '{"walls":[...]}'`.
 * **CI** (GitHub Actions, every push and pull request): typecheck, build and unit tests on Linux (Node 20 / 22 / 24),
   macOS and Windows, a check that `docs/TOOLS.md` is up to date, and builds of the add-on against the public
-  Archicad 26 DevKits: universal (arm64 + x86_64) for macOS and x64 for Windows (`scripts/windows/build-addon.ps1`,
-  v142 toolset). With the repository secrets `AC_MDID_DEVELOPER` / `AC_MDID_LOCAL` (your own Graphisoft add-on ID,
+  Archicad 26, 27, 28 and 29 DevKits: universal (arm64 + x86_64) for macOS and x64 for Windows
+  (`scripts/windows/build-addon.ps1`, v142 / v143 toolset). With the repository secrets `AC_MDID_DEVELOPER` / `AC_MDID_LOCAL` (your own Graphisoft add-on ID,
   never a borrowed one) the builds carry that ID and are uploaded as workflow artifacts. The live suites need a
   running Archicad and stay local.
 * Architecture, conventions, Core API and patterns for adding commands/tools: [docs/DEVELOPING.md](docs/DEVELOPING.md).

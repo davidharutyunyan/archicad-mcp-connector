@@ -92,10 +92,13 @@ defineTool(server, ctx, { name: "get_stories", title, description, input: {...zo
 
 ### Windows
 
-* The Archicad 25-27 headers (`GSRoot/Definitions.hpp`) `#error` on any compiler but Visual Studio 2019's (`_MSC_VER`
+* The Archicad 25-28 headers (`GSRoot/Definitions.hpp`) `#error` on any compiler but Visual Studio 2019's (`_MSC_VER`
   1920-1929): build with the **v142** toolset (`-T v142`; Visual Studio 2022/2026 install it as the component
-  *MSVC v142 - VS 2019 C++ x64/x86 build tools*). `scripts/windows/build-addon.ps1` picks an installation that has it.
-  On GitHub Actions the `windows-2025` image has it; the VS 2026 images (`windows-latest`) do not.
+  *MSVC v142 - VS 2019 C++ x64/x86 build tools*). Archicad 29 needs Visual Studio 2022 (**v143**, `_MSC_VER`
+  1930-1949). `scripts/windows/build-addon.ps1 -ArchicadVersion NN` picks an installation with the right toolset.
+  On GitHub Actions the `windows-2025` image has both; the VS 2026 images (`windows-latest`) lack v142.
+* MSVC rejects a few things clang accepts: `cond ? array : array.Get ()` style ternaries that would copy through a
+  deleted `const&&` constructor (spell out both branches as values), `GS::UniChar (str[i])` on a non-const string.
 * Compile flags follow the DevKit examples: `/Zc:wchar_t-` (GS uses `unsigned short` UTF-16), plus `/utf-8` for our
   non-ASCII literals and `/bigobj` for the large command files. The resources compile with the DevKit's
   `CompileResources.py` (cl preprocessor + ResConv + rc) from `RFIX.win/ClaudeConnector.rc2`; the `.res` is linked into
@@ -107,11 +110,60 @@ defineTool(server, ctx, { name: "get_stories", title, description, input: {...zo
 * Undo/redo drive the Cocoa Edit menu and are macOS-only (`ProjectEditMenu.inl.hpp` returns APIERR_NOTSUPPORTED on Windows).
 * MCP server: image downscaling uses `sips` on macOS and PowerShell + System.Drawing on Windows (`views-image.ts`).
 
+## Archicad versions (26–29)
+
+One source tree builds for every version: CMake reads the version from the DevKit (`ARCHICAD_VERSION`) and defines
+`CC_AC_VERSION` (26, 27, 28, 29); 27+ is "modern" (C++20, `ACAP_STAT` in `Support/Lib`, all module libraries linked).
+Version-specific code is `#if CC_AC_VERSION >= NN`; keep the threshold where the API really changed (check the
+headers of every DevKit, e.g. `grep -rn <name> .devkit/devkit2{6,7,8,9}/Support/Inc`).
+
+* `Core/ApiCompat.hpp/.cpp` keeps the Archicad 26 call style working on 27+: the five dispatchers
+  (`ACAPI_Environment/Database/Goodies/Automate/Navigator (code, par1, ...)`) are re-created on top of the per-operation
+  functions Archicad 27 introduced, renamed functions forward to their new names (`CC_API_RENAMED`), and small helpers
+  hide type changes: `AttrIndexToInt` / `AttrIndexFromInt` (`API_AttributeIndex` became a class), overridden
+  attributes / cut-fill pens (`APIOptional`, `API_OverriddenPen`), hash table iteration (`HashKeyOf` / `HashValueOf`),
+  `CC_CASE_INSENSITIVE`, `IfcRelationshipKey`, `ToModuleAttrIndex`.
+  The dispatcher cases follow the **Archicad 26 header comments** (`APIdefs_*.h`), not the migration notes: e.g.
+  `APINavigator_GetNavigatorChildrenItemsID` takes the array in **par3** (par2 is a handle).
+* Pens, fonts, dimension standards and model view options left the attribute system in 27; the connector keeps them as
+  attribute types (`API_PenID` ... are defined above `API_AttrTypeID`'s range) and `AttrIndices` / `GetAttrHeader` /
+  `AttrData::LoadRelocated` route them to their own functions.
+* **Attribute indices on 27+** are not `1..ACAPI_Attribute_GetNum` (that is a count) and may be large: iterate
+  `AttrIndices (type)` (`ACAPI_Attribute_EnumerateAttributesByType`), never `1..count` or `1..maxIndex` (a loop to
+  the highest index froze Archicad 29).
+* Thresholds that are easy to get wrong: 28 (not 27) for `GS::CaseInsensitive`, `memo.textContent` as
+  `GS::UniString*`, IFC relationship keys as GlobalId strings, no `APIVarId_SymbStair`, `ACAPI_ProjectOperation_Quit ()`
+  without the magic code, `ACAPI_IFC_*Guid*` / `ACAPI_Element_GetIFCType` removed; 29 for per-end line arrows
+  (`startArrowData` / `endArrowData`), the IFC setter functions removed, `API_OpeningType` removed, `enableSaveAlert`
+  removed, MEP domains instead of `isForDuctwork` ..., classification dates as `std::chrono::year_month_day`.
+* Archicad 27's `GSMalloc.hpp` turns `realloc` into a macro that breaks libc++: the allocator headers are force-included
+  on 29 only (as in its DevKit examples).
+* **IFC** (`PropertiesIfc.cpp`): 26–27 use the C functions; 28 keeps the setters but computes GlobalId ↔ GUID itself
+  (base-64 of the 128-bit GUID, identical to Archicad's) and reads types through `IFCAPI`; 29 reads everything through
+  `IFCAPI::ObjectAccessor` / `PropertyAccessor` (local = stored, preview = with the translator) and has no setters.
+* **Opening tool on 29** (`OpeningsExtrusion29.cpp`, the 26–28 file is `#if CC_AC_VERSION < 29`): `OpeningDefault`
+  → `Place (host, point)` → `Opening::Modify`. Quirks of build 3100:
+  * `GetVectorX/Y/GetExtrusionDirection` return the axes **offset by the host's origin** (wall begin point, first slab
+    vertex): v = P + e. The frame is left-handed (z = y × x); `CurrentFrame` recovers the axes from the differences.
+  * `Transform` checks the turned frame with a near-zero tolerance, so many exact rotations are refused ("Can transform
+    only with ortogonal matrix with no scaling"); a refused call is a no-op, `TransformWithRetry` nudges the angle by
+    ~1e-10 rad. Pure moves are sent as exact translation matrices. `rotation` is absolute (from the default x axis),
+    as on 26–28.
+  * The tool default may link width and height; different sizes unlink them first.
+* MCP server: `ArchicadClient.archicadVersion ()` (cached per port) drives version-specific calls — attribute folder
+  commands (path-based on 26, GUID-based from 27: `GetAttributeFolderStructure`, `GetAttributeFolders`,
+  `RenameAttributeFolders`), `GetElementsRelatedToZones` (`elementTypes` required on 29), "save as previous version".
+  The unit-test harness answers `API.GetProductInfo` with `harness (responder, { archicadVersion })` (default 26).
+* Build directories: `addon/build` (26), `addon/build-ac<version>` (macOS), `addon\build-win-ac<version>` (Windows).
+
 ## DevKit reference material
 
 * Headers: `.devkit/devkit26/Support/Inc/*.h` (`APIdefs_Elements.h` = all element structs, `APIdefs_Attributes.h`, `APIdefs_Environment.h`, `APIdefs_Database.h`, `APIdefs_Automate.h`, `APIdefs_Goodies.h`, `APIdefs_Interface.h`, `APIdefs_LibraryParts.h`, `APIdefs_Properties.h`, `APIdefs_Navigator.h`, `ACAPinc.h` = function list).
 * Examples (working code for almost every API): `.devkit/devkit26/Examples/*/Src/*.cpp`, especially `Element_Test` (creation/modification of every element type, curtain walls, dimensions, labels, hotlinks, trims, solid ops), `Attribute_Test`, `Database_Control` (layouts, drawings, databases), `Automate_Functions` (save/open/print/publish/zoom/render), `Environment_Control` (stories, preferences, 3D, view settings), `Goodie_Functions` (params, polygons, conversions), `LibPart_Test` (library parts, creating GDL objects), `Property_Test`, `Classification_Test`, `Navigator_Test`, `Teamwork_Control`, `MarkUp_Manager`, `Favorite_Test`, `IFC_Test`, `Interface_Functions`, `Selection_Manager`, `3D_Test`, `Model3DViewer_Test`.
-* Official JSON API command list for AC26: 72 commands (see `src/tools/official.ts`).
+* Official JSON API command list for AC26: 72 commands (see `src/tools/official.ts`); 27 replaced the path-based attribute
+  folder commands, 28 added `GetAttributesIndices` and `onlySupportedTypes` for `GetSelectedElements`, 29 made
+  `elementTypes` of `GetElementsRelatedToZones` required.
+* Headers of the other versions: `.devkit/devkit27|28|29/Support/Inc`, C++ element APIs in `Support/Modules/ArchicadAPI/ACAPI/Element` (29: Opening), IFC in `Support/Modules/IFCInOutAPI/ACAPI` (28+).
 
 ## Build & test
 
