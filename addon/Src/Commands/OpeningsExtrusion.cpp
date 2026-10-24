@@ -22,6 +22,9 @@
 //   + common: layer, renovationStatus, elementId   (the story is always the host's story)
 // *****************************************************************************
 
+// Archicad 26-28 (API_OpeningType). Archicad 29+: OpeningsExtrusion29.cpp.
+#if CC_AC_VERSION < 29
+
 #include "Commands/Openings.hpp"
 #include "Core/Command.hpp"
 #include "Core/Elements.hpp"
@@ -202,8 +205,15 @@ void ApplyOpeningFields (API_OpeningType& op, API_Element* mask, const OS& spec,
 		if (*height <= 0.0) Fail ("'height' must be greater than 0 (meters).");
 		par.height = *height; PAR_SET (height);
 	}
+	// The tool default may link the sizes: unlink for different width and height.
+	const bool differentSizes = width.has_value () && height.has_value () && std::fabs (*width - *height) > 1e-9;
 	if (auto v = OptBool (spec, "linkedSize")) {
+		if (*v && differentSizes)
+			Fail ("'linkedSize': true needs equal 'width' and 'height'.");
 		par.linkedStatus = *v ? API_OpeningLinked : API_OpeningNotLinked;
+		PAR_SET (linkedStatus);
+	} else if (differentSizes && par.linkedStatus == API_OpeningLinked) {
+		par.linkedStatus = API_OpeningNotLinked;
 		PAR_SET (linkedStatus);
 	}
 	if (spec.Contains ("anchor")) {
@@ -362,8 +372,18 @@ void ApplyOpeningFields (API_OpeningType& op, API_Element* mask, const OS& spec,
 }
 
 
+void RejectCutElements (const OS& spec)
+{
+	for (const char* key : { "cutElements", "addCutElements", "removeCutElements" }) {
+		if (spec.Contains (key))
+			Fail ("'" + GS::UniString (key) + "' needs Archicad 29 or newer (older openings cut only their owner).", APIERR_NOTSUPPORTED);
+	}
+}
+
+
 API_Guid CreateOpening (const OS& spec)
 {
+	RejectCutElements (spec);
 	const std::optional<API_Guid> ownerGuid = OptGuidAny (spec, { "owner", "host" });
 	if (!ownerGuid.has_value ())
 		Fail ("An opening needs 'owner': the GUID of the element it cuts (wall, slab, roof, shell, beam, column, mesh ...).");
@@ -466,6 +486,7 @@ void SerializeOpening (const API_Element& element, OS& out)
 
 void ModifyOpening (API_Element& element, API_Element& mask, API_ElementMemo&, UInt64&, const OS& patch)
 {
+	RejectCutElements (patch);
 	API_OpeningType& op = element.opening;
 	if (auto newOwner = OptGuidAny (patch, { "owner", "host" }); newOwner.has_value () && *newOwner != op.owner)
 		Fail ("An opening cannot be moved to another host element (Archicad does not allow changing its connection). Delete it and create a new one.", APIERR_NOTSUPPORTED);
@@ -487,3 +508,5 @@ void RegisterOpeningToolAdapter ()
 
 } // namespace openings
 } // namespace cc
+
+#endif // CC_AC_VERSION < 29
