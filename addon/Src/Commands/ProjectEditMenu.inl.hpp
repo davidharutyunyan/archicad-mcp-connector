@@ -431,7 +431,7 @@ OS RunEditAction (EditAction action, const OS& params)
 	return out;
 #else
 	(void) params;
-	Fail (GS::UniString (ActionName (action)) + " is not available: the Archicad 26 API has no undo/redo function, and the Edit-menu workaround is implemented for macOS only.", APIERR_NOTSUPPORTED);
+	Fail (GS::UniString (ActionName (action)) + " is not available: the Archicad API has no undo/redo function, and the Edit-menu workaround is implemented for macOS only.", APIERR_NOTSUPPORTED);
 #endif
 }
 

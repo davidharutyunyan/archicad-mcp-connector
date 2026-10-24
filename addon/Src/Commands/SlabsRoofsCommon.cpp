@@ -218,37 +218,6 @@ void CheckCompositeUsage (const OS& spec, API_AttributeIndex composite, short us
 }
 
 
-bool ApplyPenOverride (const OS& spec, API_PenOverrideType& po)
-{
-	bool changed = false;
-	auto one = [&] (const char* key, short& pen, bool& flag) {
-		if (!spec.Contains (key))
-			return;
-		changed = true;
-		if (spec.IsBool (key)) {
-			if (GetBool (spec, key))
-				Fail ("Field '" + Key (key) + "' must be a pen index 1-255, or false to remove the override.");
-			flag = false;
-			return;
-		}
-		ApplyPen (spec, key, pen);
-		flag = true;
-	};
-	one ("cutFillPen", po.cutFillPen, po.overrideCutFillPen);
-	one ("cutFillBackgroundPen", po.cutFillBackgroundPen, po.overrideCutFillBackgroundPen);
-	return changed;
-}
-
-
-void AddPenOverrideJson (OS& out, const API_PenOverrideType& po)
-{
-	if (po.overrideCutFillPen)
-		out.Add ("cutFillPen", (Int32) po.cutFillPen);
-	if (po.overrideCutFillBackgroundPen)
-		out.Add ("cutFillBackgroundPen", (Int32) po.cutFillBackgroundPen);
-}
-
-
 bool ApplyStoryVisibility (const OS& spec, API_StoryVisibility& contour, API_StoryVisibility& fill)
 {
 	OS v;
@@ -322,9 +291,9 @@ bool SameTrim (const API_EdgeTrim& a, const API_EdgeTrim& b)
 
 bool SameOverride (const API_OverriddenAttribute& a, const API_OverriddenAttribute& b)
 {
-	if (a.overridden != b.overridden)
+	if (IsOverridden (a) != IsOverridden (b))
 		return false;
-	return !a.overridden || a.attributeIndex == b.attributeIndex;
+	return !IsOverridden (a) || OverriddenIndex (a) == OverriddenIndex (b);
 }
 
 // --- Polygon helpers ---------------------------------------------------------------------------
@@ -700,8 +669,8 @@ void AddEdgesJson (OS& out, const API_ElementMemo& memo, const API_EdgeTrim& def
 			if (j < nTrims)
 				AddEdgeTrimJson (e, (*memo.edgeTrims)[j], "trim", "angle");
 			if (sideDiff) {
-				if (memo.sideMaterials[j].overridden)
-					e.Add ("surface", AttrRef (API_MaterialID, memo.sideMaterials[j].attributeIndex));
+				if (IsOverridden (memo.sideMaterials[j]))
+					e.Add ("surface", AttrRef (API_MaterialID, OverriddenIndex (memo.sideMaterials[j])));
 				else
 					e.Add ("surface", false);
 			}
@@ -757,7 +726,7 @@ void ApplyShellBaseFields (API_ShellBaseType& base, const FieldMask& m, const OS
 	if (ApplyAttr (spec, "contourLineType", API_LinetypeID, base.ltypeInd))	m.Set (&base.ltypeInd);
 	if (ApplyPen (spec, "cutContourPen", base.sectContPen))					m.Set (&base.sectContPen);
 	if (ApplyAttr (spec, "cutContourLineType", API_LinetypeID, base.sectContLtype))	m.Set (&base.sectContLtype);
-	if (ApplyPenOverride (spec, base.penOverride))							m.Set (&base.penOverride);
+	if (ApplyCutFillPens (spec, CutFillPensOf (base)))						ForCutFillPenFields (base, [&] (auto& field) { m.Set (&field); });
 	if (ApplyFlag (spec, "showCoverFill", base.useFloorFill))				m.Set (&base.useFloorFill);
 	if (ApplyAttr (spec, "coverFill", API_FilltypeID, base.floorFillInd))	m.Set (&base.floorFillInd);
 	if (ApplyPen (spec, "coverFillPen", base.floorFillPen))					m.Set (&base.floorFillPen);
@@ -783,7 +752,7 @@ void AddShellBaseJson (OS& out, const API_ShellBaseType& base)
 {
 	out.Add ("level", base.level);
 	out.Add ("thickness", base.thickness);
-	AddStructureJson (out, base.modelElemStructureType, base.buildingMaterial, base.composite, 0);
+	AddStructureJson (out, base.modelElemStructureType, base.buildingMaterial, base.composite, AttrIndexFromInt (0));
 	AddOverriddenSurfaceJson (out, "topSurface", base.topMat);
 	AddOverriddenSurfaceJson (out, "bottomSurface", base.botMat);
 	AddOverriddenSurfaceJson (out, "sideSurface", base.sidMat);
@@ -796,7 +765,7 @@ void AddShellBaseJson (OS& out, const API_ShellBaseType& base)
 	out.Add ("contourLineType", AttrRef (API_LinetypeID, base.ltypeInd));
 	out.Add ("cutContourPen", (Int32) base.sectContPen);
 	out.Add ("cutContourLineType", AttrRef (API_LinetypeID, base.sectContLtype));
-	AddPenOverrideJson (out, base.penOverride);
+	AddCutFillPensJson (out, CutFillPensOf (base));
 	out.Add ("showCoverFill", base.useFloorFill);
 	out.Add ("coverFill", AttrRef (API_FilltypeID, base.floorFillInd));
 	out.Add ("coverFillPen", (Int32) base.floorFillPen);

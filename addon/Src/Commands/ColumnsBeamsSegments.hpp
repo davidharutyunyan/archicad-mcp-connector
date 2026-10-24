@@ -68,8 +68,6 @@ bool			ApplyLineStyle (const OS& lines, const char* key, short* pen, API_Attribu
 OS				LineStyleJson (const short* pen, const API_AttributeIndex* lineType);
 
 // "cutFillPen" / "cutFillBackgroundPen": pen index, or false to use the structure's pens.
-bool			ApplyPenOverride (const OS& spec, API_PenOverrideType& penOverride);
-void			AddPenOverrideJson (OS& out, const API_PenOverrideType& penOverride);
 
 // "coverFill": {enabled, fill, pen, backgroundPen, fromSurface, orientationFrom3D} (uncut floor plan fill).
 struct CoverFillRefs {

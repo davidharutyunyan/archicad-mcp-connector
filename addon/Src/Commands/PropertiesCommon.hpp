@@ -24,6 +24,8 @@
 #include "Core/Json.hpp"
 #include "Core/Types.hpp"
 
+#include <chrono>
+
 namespace cc {
 namespace props {
 
@@ -209,10 +211,17 @@ private:
 // Classification item GUIDs of elements (union), warnings for unclassified elements.
 GS::Array<API_Guid>	ClassificationItemsOfElements (const GS::Array<API_Guid>& elements, GS::Array<GS::UniString>& warnings);
 
-// "YYYY-MM-DD" <-> GSDateRecord
-GSDateRecord		ParseDate (const GS::UniString& text);
-GS::UniString		DateToString (const GSDateRecord& date);
-GSDateRecord		Today ();
+// Classification system edition dates: GSDateRecord up to Archicad 28, std::chrono::year_month_day from 29.
+#if CC_AC_VERSION >= 29
+using ClassificationDate = std::chrono::year_month_day;
+#else
+using ClassificationDate = GSDateRecord;
+#endif
+
+// "YYYY-MM-DD" <-> ClassificationDate
+ClassificationDate	ParseDate (const GS::UniString& text);
+GS::UniString		DateToString (const ClassificationDate& date);
+ClassificationDate	Today ();
 
 API_Guid			NewGuid ();
 

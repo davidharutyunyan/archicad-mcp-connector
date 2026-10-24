@@ -139,7 +139,7 @@ void ApplySlabFields (API_Element& element, API_Element* mask, const OS& spec)
 	if (ApplyAttr (spec, "cutContourLineType", API_LinetypeID, slab.sectContLtype))	m.Set (&slab.sectContLtype);
 	if (ApplyPen (spec, "hiddenContourPen", slab.hiddenContourLinePen))		m.Set (&slab.hiddenContourLinePen);
 	if (ApplyAttr (spec, "hiddenContourLineType", API_LinetypeID, slab.hiddenContourLineType))	m.Set (&slab.hiddenContourLineType);
-	if (ApplyPenOverride (spec, slab.penOverride))							m.Set (&slab.penOverride);
+	if (ApplyCutFillPens (spec, CutFillPensOf (slab)))						ForCutFillPenFields (slab, [&] (auto& field) { m.Set (&field); });
 	if (ApplyFlag (spec, "showCoverFill", slab.useFloorFill))				m.Set (&slab.useFloorFill);
 	if (ApplyAttr (spec, "coverFill", API_FilltypeID, slab.floorFillInd))	m.Set (&slab.floorFillInd);
 	if (ApplyPen (spec, "coverFillPen", slab.floorFillPen))					m.Set (&slab.floorFillPen);
@@ -196,7 +196,7 @@ void SerializeSlab (const API_Element& element, OS& out)
 	out.Add ("level", slab.level);
 	out.Add ("referencePlane", NameOf (kSlabRefPlanes, slab.referencePlaneLocation));
 	out.Add ("offsetFromTop", slab.offsetFromTop);
-	AddStructureJson (out, slab.modelElemStructureType, slab.buildingMaterial, slab.composite, 0);
+	AddStructureJson (out, slab.modelElemStructureType, slab.buildingMaterial, slab.composite, AttrIndexFromInt (0));
 	AddOverriddenSurfaceJson (out, "topSurface", slab.topMat);
 	AddOverriddenSurfaceJson (out, "bottomSurface", slab.botMat);
 	AddOverriddenSurfaceJson (out, "sideSurface", slab.sideMat);
@@ -217,7 +217,7 @@ void SerializeSlab (const API_Element& element, OS& out)
 	out.Add ("cutContourLineType", AttrRef (API_LinetypeID, slab.sectContLtype));
 	out.Add ("hiddenContourPen", (Int32) slab.hiddenContourLinePen);
 	out.Add ("hiddenContourLineType", AttrRef (API_LinetypeID, slab.hiddenContourLineType));
-	AddPenOverrideJson (out, slab.penOverride);
+	AddCutFillPensJson (out, CutFillPensOf (slab));
 	out.Add ("showCoverFill", slab.useFloorFill);
 	out.Add ("coverFill", AttrRef (API_FilltypeID, slab.floorFillInd));
 	out.Add ("coverFillPen", (Int32) slab.floorFillPen);

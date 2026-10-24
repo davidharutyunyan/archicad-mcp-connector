@@ -112,8 +112,6 @@ bool ApplyFlag (const OS& spec, const char* key, bool& value);
 bool ApplyPenField (const OS& spec, const char* key, short& pen);
 bool ApplyAttrField (const OS& spec, const char* key, API_AttrTypeID type, API_AttributeIndex& index);
 // Cut fill pen overrides: "cutFillPen" / "cutFillBackgroundPen" = pen index or false.
-bool ApplyCutFillPenOverride (const OS& spec, API_PenOverrideType& penOverride);
-void AddCutFillPenOverrideJson (OS& out, const API_PenOverrideType& penOverride);
 
 // Explicit "storyIndex" wins over "relative to the current story" creation mode.
 void ApplyStoryCreationMode (API_LinkToSettings& link, const OS& spec);

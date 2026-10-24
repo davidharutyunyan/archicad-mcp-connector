@@ -626,8 +626,11 @@ void RegisterPropertyCommands ()
 			const Int32 offset = std::max (0, GetInt (params, "offset", 0));
 			const Int32 limit = std::max (1, GetInt (params, "limit", 500));
 
-			GS::Array<API_PropertyDefinition> candidates = params.Contains ("properties")
-				? index.ResolveDefinitions (params, "properties") : index.Definitions ();
+			GS::Array<API_PropertyDefinition> candidates;
+			if (params.Contains ("properties"))
+				candidates = index.ResolveDefinitions (params, "properties");
+			else
+				candidates = index.Definitions ();
 
 			if (params.Contains ("groups")) {
 				GS::Array<API_Guid> groupGuids;

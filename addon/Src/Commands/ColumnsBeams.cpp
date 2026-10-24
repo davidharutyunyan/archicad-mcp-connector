@@ -93,7 +93,7 @@ bool ContainsAny (const OS& spec, std::initializer_list<const char*> keys)
 
 bool SameSurface (const API_OverriddenAttribute& a, const API_OverriddenAttribute& b)
 {
-	return a.overridden == b.overridden && (!a.overridden || a.attributeIndex == b.attributeIndex);
+	return IsOverridden (a) == IsOverridden (b) && (!IsOverridden (a) || OverriddenIndex (a) == OverriddenIndex (b));
 }
 
 
@@ -378,9 +378,8 @@ void ApplyColumnFields (API_ColumnType& col, API_Element* mask, const OS& spec)
 		COL_SET (visibility.showOnHome); COL_SET (visibility.showAllAbove); COL_SET (visibility.showAllBelow);
 		COL_SET (visibility.showRelAbove); COL_SET (visibility.showRelBelow); COL_SET (isAutoOnStoryVisibility);
 	}
-	if (ApplyPenOverride (spec, col.penOverride)) {
-		COL_SET (penOverride.cutFillPen); COL_SET (penOverride.cutFillBackgroundPen);
-		COL_SET (penOverride.overrideCutFillPen); COL_SET (penOverride.overrideCutFillBackgroundPen);
+	if (ApplyCutFillPens (spec, CutFillPensOf (col))) {
+		CC_MASK_CUT_FILL_PENS (COL_SET);
 	}
 	if (ApplyCoverFill (spec, { col.useCoverFill, col.useCoverFillFromSurface, col.coverFillOrientationComesFrom3D,
 								col.coverFillType, col.coverFillForegroundPen, col.coverFillBackgroundPen })) {
@@ -587,7 +586,7 @@ void SerializeColumn (const API_Element& element, OS& out)
 	out.Add ("floorPlanDisplay", NameOf (kDisplayOptions, col.displayOption));
 	out.Add ("viewDepthLimitation", NameOf (kViewDepthLimitations, col.viewDepthLimitation));
 	AddStoryVisibilityJson (out, "showOnStories", col.visibility, col.isAutoOnStoryVisibility);
-	AddPenOverrideJson (out, col.penOverride);
+	AddCutFillPensJson (out, CutFillPensOf (col));
 	AddCoverFillJson (out, col.useCoverFill, col.useCoverFillFromSurface, col.coverFillOrientationComesFrom3D,
 					  col.coverFillType, col.coverFillForegroundPen, col.coverFillBackgroundPen);
 	out.Add ("lines", OS ("contour", LineStyleJson (&col.corePen, &col.contLtype),
@@ -802,9 +801,8 @@ void ApplyBeamFields (API_BeamType& beam, API_Element* mask, const OS& spec)
 		BEAM_SET (visibility.showOnHome); BEAM_SET (visibility.showAllAbove); BEAM_SET (visibility.showAllBelow);
 		BEAM_SET (visibility.showRelAbove); BEAM_SET (visibility.showRelBelow); BEAM_SET (isAutoOnStoryVisibility);
 	}
-	if (ApplyPenOverride (spec, beam.penOverride)) {
-		BEAM_SET (penOverride.cutFillPen); BEAM_SET (penOverride.cutFillBackgroundPen);
-		BEAM_SET (penOverride.overrideCutFillPen); BEAM_SET (penOverride.overrideCutFillBackgroundPen);
+	if (ApplyCutFillPens (spec, CutFillPensOf (beam))) {
+		CC_MASK_CUT_FILL_PENS (BEAM_SET);
 	}
 	if (ApplyCoverFill (spec, { beam.useCoverFill, beam.useCoverFillFromSurface, beam.coverFillOrientationComesFrom3D,
 								beam.coverFillType, beam.coverFillForegroundPen, beam.coverFillBackgroundPen })) {
@@ -1089,7 +1087,7 @@ void SerializeBeam (const API_Element& element, OS& out)
 	out.Add ("floorPlanDisplay", NameOf (kDisplayOptions, beam.displayOption));
 	out.Add ("viewDepthLimitation", NameOf (kViewDepthLimitations, beam.viewDepthLimitation));
 	AddStoryVisibilityJson (out, "showOnStories", beam.visibility, beam.isAutoOnStoryVisibility);
-	AddPenOverrideJson (out, beam.penOverride);
+	AddCutFillPensJson (out, CutFillPensOf (beam));
 	AddCoverFillJson (out, beam.useCoverFill, beam.useCoverFillFromSurface, beam.coverFillOrientationComesFrom3D,
 					  beam.coverFillType, beam.coverFillForegroundPen, beam.coverFillBackgroundPen);
 	out.Add ("lines", OS ("reference", LineStyleJson (&beam.refPen, &beam.refLtype),

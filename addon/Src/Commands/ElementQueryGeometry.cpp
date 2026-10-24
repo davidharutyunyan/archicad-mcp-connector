@@ -189,7 +189,7 @@ private:
 			return;
 		out.Add ("from", Pt (p.line.c1));
 		out.Add ("to", Pt (p.line.c2));
-		out.Add ("lineType", (Int32) p.line.ltypeInd);
+		out.Add ("lineType", AttrIndexToInt (p.line.ltypeInd));
 		prims.Push (out);
 	}
 
@@ -220,7 +220,7 @@ private:
 		}
 		if (a.solid)
 			out.Add ("filled", true);
-		out.Add ("lineType", (Int32) a.ltypeInd);
+		out.Add ("lineType", AttrIndexToInt (a.ltypeInd));
 		prims.Push (out);
 	}
 
@@ -268,7 +268,7 @@ private:
 			if (!arcList.IsEmpty ())
 				out.Add ("arcs", arcList);
 		}
-		out.Add ("lineType", (Int32) pl.ltypeInd);
+		out.Add ("lineType", AttrIndexToInt (pl.ltypeInd));
 		prims.Push (out);
 	}
 

@@ -652,8 +652,8 @@ OS GetDatabases (const OS& params)
 		for (const API_DatabaseInfo& info : ListDatabases (t)) {
 			if (!search.IsEmpty ()) {
 				const GS::UniString name (info.name), title (info.title), ref (info.ref);
-				if (!name.Contains (search, GS::UniString::CaseInsensitive) && !title.Contains (search, GS::UniString::CaseInsensitive) &&
-					!ref.Contains (search, GS::UniString::CaseInsensitive))
+				if (!ContainsIgnoreCase (name, search) && !ContainsIgnoreCase (title, search) &&
+					!ContainsIgnoreCase (ref, search))
 					continue;
 			}
 			OS db = DatabaseJson (info);
@@ -883,6 +883,20 @@ OS PlaceDrawings (const OS& params)
 			});
 		}
 	});
+
+#if CC_AC_VERSION >= 27
+	// Archicad 27+ can update drawings directly: refresh the new ones, so that a view changed just before (scale,
+	// layers ...) is drawn with its current settings, not with the content Archicad cached for earlier drawings of it.
+	{
+		GS::Array<API_Guid> placed;
+		for (const PlaceJob& job : jobs) {
+			if (job.guid != APINULLGuid)
+				placed.Push (job.guid);
+		}
+		if (!placed.IsEmpty ())
+			ACAPI_Drawing_Update_Drawings (placed);
+	}
+#endif
 
 	// 3) Scale for sources without a known view scale (a separate step: changing a drawing in the same
 	//    undo step that created it is unreliable in Archicad).
@@ -1165,13 +1179,30 @@ OS UpdateDrawings (const OS& params)
 	bool anyManual = false;
 	for (const Target& t : targets)
 		anyManual = anyManual || (t.manual && !t.error.Contains ("error"));
-	if (includeManual && anyManual)
+#if CC_AC_VERSION >= 27
+	// Archicad 27+: a direct update (also of manual-update drawings).
+	GSErrCode directErr = NoError;
+	{
+		GS::Array<API_Guid> toUpdate;
+		for (const Target& t : targets) {
+			if (!t.error.Contains ("error") && (includeManual || !t.manual))
+				toUpdate.Push (t.guid);
+		}
+		if (!toUpdate.IsEmpty ())
+			directErr = ACAPI_Drawing_Update_Drawings (toUpdate);
+	}
+	const bool direct = directErr == NoError;
+#else
+	const bool direct = false;
+#endif
+
+	if (!direct && includeManual && anyManual)
 		setManual (false, "Update drawings: automatic (Claude)");
 
 	// Open every affected layout: Archicad updates outdated auto-update drawings when a layout is displayed.
 	GS::Array<API_DatabaseInfo> opened;
 	for (const Target& t : targets) {
-		if (t.error.Contains ("error"))
+		if (direct || t.error.Contains ("error"))
 			continue;
 		bool seen = false;
 		for (const API_DatabaseInfo& o : opened)
@@ -1187,7 +1218,7 @@ OS UpdateDrawings (const OS& params)
 		}
 	}
 
-	if (includeManual && anyManual)
+	if (!direct && includeManual && anyManual)
 		setManual (true, "Update drawings: restore manual (Claude)");
 
 	GS::Array<OS> results = errors;
@@ -1219,10 +1250,14 @@ OS UpdateDrawings (const OS& params)
 	out.Add ("drawingCount", (Int32) targets.GetSize ());
 	out.Add ("updatedCount", updated);
 	out.Add ("upToDateCount", upToDate);
-	out.Add ("note", GS::UniString ("Archicad 26 has no direct 'update drawing' API (added in Archicad 27). The connector opens each "
-									"layout (Archicad refreshes auto-update drawings when a layout is shown), temporarily switching manual "
-									"drawings to automatic. Drawings still 'Modified' afterwards: open the layout in Archicad and use "
-									"Document > Drawing Manager > Update, or publish the layout (publishing updates drawings)."));
+	if (direct) {
+		out.Add ("method", GS::UniString ("direct update (Archicad 27+ API)"));
+	} else {
+		out.Add ("note", GS::UniString ("Archicad 26 has no direct 'update drawing' API (added in Archicad 27). The connector opens each "
+										"layout (Archicad refreshes auto-update drawings when a layout is shown), temporarily switching manual "
+										"drawings to automatic. Drawings still 'Modified' afterwards: open the layout in Archicad and use "
+										"Document > Drawing Manager > Update, or publish the layout (publishing updates drawings)."));
+	}
 	return out;
 }
 

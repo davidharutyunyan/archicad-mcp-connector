@@ -1325,29 +1325,44 @@ GS::Array<API_Guid> ClassificationItemsOfElements (const GS::Array<API_Guid>& el
 }
 
 
-GSDateRecord ParseDate (const GS::UniString& text)
+static ClassificationDate MakeDate (int y, int m, int d)
+{
+#if CC_AC_VERSION >= 29
+	return std::chrono::year_month_day { std::chrono::year (y), std::chrono::month ((unsigned) m), std::chrono::day ((unsigned) d) };
+#else
+	return GSDateRecord ((unsigned short) y, (unsigned short) m, (unsigned short) d);
+#endif
+}
+
+
+ClassificationDate ParseDate (const GS::UniString& text)
 {
 	int y = 0, m = 0, d = 0;
 	const GS::String s = ToStr (Trimmed (text));
 	if (std::sscanf (s.ToCStr (), "%d-%d-%d", &y, &m, &d) != 3 || y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31)
 		Fail ("Invalid date '" + text + "': use YYYY-MM-DD.");
-	return GSDateRecord ((unsigned short) y, (unsigned short) m, (unsigned short) d);
+	return MakeDate (y, m, d);
 }
 
 
-GS::UniString DateToString (const GSDateRecord& date)
+GS::UniString DateToString (const ClassificationDate& date)
 {
+#if CC_AC_VERSION >= 29
+	const unsigned year = (unsigned) (int) date.year (), month = (unsigned) date.month (), day = (unsigned) date.day ();
+#else
+	const unsigned year = date.year, month = date.month, day = date.day;
+#endif
 	char buf[32];
-	std::snprintf (buf, sizeof (buf), "%04u-%02u-%02u", (unsigned) date.year, (unsigned) date.month, (unsigned) date.day);
+	std::snprintf (buf, sizeof (buf), "%04u-%02u-%02u", year, month, day);
 	return GS::UniString (buf);
 }
 
 
-GSDateRecord Today ()
+ClassificationDate Today ()
 {
 	GSTimeRecord rec;
 	TIGetTimeRecord (GSTime (), &rec, TI_CURRENT_TIME);
-	return GSDateRecord (rec.year, rec.month, rec.day);
+	return MakeDate (rec.year, rec.month, rec.day);
 }
 
 

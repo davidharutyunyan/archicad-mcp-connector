@@ -274,27 +274,55 @@ GS::UniString ColorHex (const API_RGBColor& color)
 }
 
 
-void ApplyArrows (API_Element& element, API_Element* mask, const OS& a, API_ArrowData& arrows)
+#if CC_AC_VERSION >= 29
+#define CC_SET_ARROW_REFS(refs, elem)	((refs).arrows = &(elem).startArrowData, (refs).endArrows = &(elem).endArrowData)
+#else
+#define CC_SET_ARROW_REFS(refs, elem)	((refs).arrows = &(elem).arrowData)
+#endif
+
+// Archicad 26-28: one API_ArrowData with begArrow / endArrow flags. Archicad 29+: one API_ArrowData per end, each with
+// arrowVisibility; type, size and pen are then written to both ends (the JSON shape is the same on every version).
+void ApplyArrows (API_Element& element, API_Element* mask, const OS& a, API_ArrowData& arrows, API_ArrowData* endArrows)
 {
+#if CC_AC_VERSION >= 29
+	API_ArrowData* ends[] = { &arrows, endArrows != nullptr ? endArrows : &arrows };
+	if (auto b = OptBool (a, "begin"))	{ ends[0]->arrowVisibility = *b; MaskField (mask, element, ends[0]->arrowVisibility); }
+	if (auto b = OptBool (a, "end"))	{ ends[1]->arrowVisibility = *b; MaskField (mask, element, ends[1]->arrowVisibility); }
+#else
+	(void) endArrows;
+	API_ArrowData* ends[] = { &arrows, &arrows };
 	if (auto b = OptBool (a, "begin"))	{ arrows.begArrow = *b; MaskField (mask, element, arrows.begArrow); }
 	if (auto b = OptBool (a, "end"))	{ arrows.endArrow = *b; MaskField (mask, element, arrows.endArrow); }
-	if (Has (a, "type")) {
-		arrows.arrowType = (API_ArrowID) ParseNamed (kArrowTypes, a, "type");
-		MaskField (mask, element, arrows.arrowType);
+#endif
+	for (API_ArrowData* end : ends) {
+		if (Has (a, "type")) {
+			end->arrowType = (API_ArrowID) ParseNamed (kArrowTypes, a, "type");
+			MaskField (mask, element, end->arrowType);
+		}
+		if (auto s = OptPositive (a, "size"))	{ end->arrowSize = *s; MaskField (mask, element, end->arrowSize); }
+		if (auto p = OptPen (a, "pen"))		{ end->arrowPen = *p; MaskField (mask, element, end->arrowPen); }
 	}
-	if (auto s = OptPositive (a, "size"))	{ arrows.arrowSize = *s; MaskField (mask, element, arrows.arrowSize); }
-	if (auto p = OptPen (a, "pen"))		{ arrows.arrowPen = *p; MaskField (mask, element, arrows.arrowPen); }
 }
 
 
-OS ArrowsJson (const API_ArrowData& arrows)
+OS ArrowsJson (const API_ArrowData& arrows, const API_ArrowData* endArrows)
 {
 	OS out;
+#if CC_AC_VERSION >= 29
+	const API_ArrowData& end = endArrows != nullptr ? *endArrows : arrows;
+	out.Add ("begin", arrows.arrowVisibility);
+	out.Add ("end", end.arrowVisibility);
+	// Style of a visible arrow (the start one when both or none are shown).
+	const API_ArrowData& style = !arrows.arrowVisibility && end.arrowVisibility ? end : arrows;
+#else
+	(void) endArrows;
 	out.Add ("begin", arrows.begArrow);
 	out.Add ("end", arrows.endArrow);
-	out.Add ("type", NameOf (kArrowTypes, arrows.arrowType));
-	out.Add ("size", arrows.arrowSize);
-	out.Add ("pen", (Int32) arrows.arrowPen);
+	const API_ArrowData& style = arrows;
+#endif
+	out.Add ("type", NameOf (kArrowTypes, style.arrowType));
+	out.Add ("size", style.arrowSize);
+	out.Add ("pen", (Int32) style.arrowPen);
 	return out;
 }
 
@@ -330,7 +358,7 @@ void ApplyLineStyle (API_Element& element, API_Element* mask, const OS& spec, co
 	if (Has (spec, "arrows")) {
 		if (r.arrows == nullptr)
 			Fail ("This element type has no arrows (remove 'arrows').", APIERR_NOTSUPPORTED);
-		ApplyArrows (element, mask, GetObject (spec, "arrows"), *r.arrows);
+		ApplyArrows (element, mask, GetObject (spec, "arrows"), *r.arrows, r.endArrows);
 	}
 }
 
@@ -344,7 +372,7 @@ void AddLineStyleJson (OS& out, const LineStyleRefs& r)
 	out.Add ("category", NameOf (kLineCategories, *r.determination));
 	out.Add ("zoneBoundary", *r.roomSeparator);
 	if (r.arrows != nullptr)
-		out.Add ("arrows", ArrowsJson (*r.arrows));
+		out.Add ("arrows", ArrowsJson (*r.arrows, r.endArrows));
 }
 
 
@@ -392,7 +420,7 @@ LineStyleRefs LineRefs (API_LineType& l)
 {
 	LineStyleRefs r;
 	r.linePen = &l.linePen; r.lineType = &l.ltypeInd; r.roomSeparator = &l.roomSeparator;
-	r.determination = &l.determination; r.arrows = &l.arrowData; r.penWeight = &l.penWeight;
+	r.determination = &l.determination; CC_SET_ARROW_REFS (r, l); r.penWeight = &l.penWeight;
 	return r;
 }
 
@@ -444,7 +472,7 @@ LineStyleRefs ArcRefs (API_ArcType& a, bool withArrows)
 {
 	LineStyleRefs r;
 	r.linePen = &a.linePen; r.lineType = &a.ltypeInd; r.roomSeparator = &a.roomSeparator;
-	r.determination = &a.determination; r.arrows = withArrows ? &a.arrowData : nullptr; r.penWeight = &a.penWeight;
+	r.determination = &a.determination; if (withArrows) { CC_SET_ARROW_REFS (r, a); } r.penWeight = &a.penWeight;
 	return r;
 }
 
@@ -643,7 +671,7 @@ LineStyleRefs PolyLineRefs (API_PolyLineType& p)
 {
 	LineStyleRefs r;
 	r.linePen = &p.linePen; r.lineType = &p.ltypeInd; r.roomSeparator = &p.roomSeparator;
-	r.determination = &p.determination; r.arrows = &p.arrowData; r.penWeight = &p.penWeight;
+	r.determination = &p.determination; CC_SET_ARROW_REFS (r, p); r.penWeight = &p.penWeight;
 	return r;
 }
 
@@ -765,7 +793,7 @@ LineStyleRefs SplineRefs (API_SplineType& s)
 {
 	LineStyleRefs r;
 	r.linePen = &s.linePen; r.lineType = &s.ltypeInd; r.roomSeparator = &s.roomSeparator;
-	r.determination = &s.determination; r.arrows = &s.arrowData; r.penWeight = &s.penWeight;
+	r.determination = &s.determination; CC_SET_ARROW_REFS (r, s); r.penWeight = &s.penWeight;
 	return r;
 }
 
@@ -1087,7 +1115,7 @@ void ApplyHatchFields (API_Element& e, API_Element* mask, const OS& spec, API_El
 	if (hasAreaText) {
 		if (auto c = OptCoord (areaText, "position"))	{ h.note.pos = *c; MaskField (mask, e, h.note.pos); }
 		if (auto p = OptPen (areaText, "pen"))		{ h.note.notePen = *p; MaskField (mask, e, h.note.notePen); }
-		if (auto f = OptAttr (API_FontID, areaText, "font"))	{ h.note.noteFont = (short) *f; MaskField (mask, e, h.note.noteFont); }
+		if (auto f = OptAttr (API_FontID, areaText, "font"))	{ h.note.noteFont = (short) AttrIndexToInt (*f); MaskField (mask, e, h.note.noteFont); }
 		if (auto s = OptPositive (areaText, "size"))	{ h.note.noteSize = *s; MaskField (mask, e, h.note.noteSize); }
 		if (auto a = OptAngle (areaText, "angle"))		{ h.note.noteAngle = *a; MaskField (mask, e, h.note.noteAngle); }
 	}
@@ -1171,7 +1199,7 @@ void SerializeHatch (const API_Element& element, OS& out)
 		OS note;
 		note.Add ("position", CoordObj (h.note.pos));
 		note.Add ("pen", (Int32) h.note.notePen);
-		note.Add ("font", AttrRef (API_FontID, h.note.noteFont));
+		note.Add ("font", AttrRef (API_FontID, AttrIndexFromInt (h.note.noteFont)));
 		note.Add ("size", h.note.noteSize);
 		AddAngle (note, "angle", h.note.noteAngle);
 		out.Add ("areaText", note);

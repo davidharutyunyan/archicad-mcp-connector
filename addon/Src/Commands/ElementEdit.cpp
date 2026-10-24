@@ -1145,10 +1145,10 @@ OS DeleteElementsCommand (const OS& params)
 	GS::Array<OS> alsoDeleted;
 	Int32 subElementsDeleted = 0;
 	for (auto it = typesBefore.EnumeratePairs (); it != nullptr; ++it) {
-		const API_Guid& g = *it->key;
+		const API_Guid& g = HashKeyOf (*it);
 		if (inputSet.Contains (g) || typesAfter.ContainsKey (g))
 			continue;
-		const API_ElemTypeID typeID = (API_ElemTypeID) *it->value;
+		const API_ElemTypeID typeID = (API_ElemTypeID) HashValueOf (*it);
 		if (IsSubElementType (typeID))
 			++subElementsDeleted;
 		else if (alsoDeleted.GetSize () < (UIndex) kMaxListedCreated)

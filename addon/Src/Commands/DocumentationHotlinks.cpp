@@ -386,7 +386,7 @@ API_Guid PlaceInstance (const API_Guid& nodeGuid, const OS& spec)
 	e.header.guid = APINULLGuid;
 	e.header.floorInd = CurrentStoryIndex ();
 	if (e.header.layer == 0)
-		e.header.layer = 1;		// the "Archicad" layer always exists
+		e.header.layer = AttrIndexFromInt (1);		// the "Archicad" layer always exists
 	ApplyCommonFields (e, nullptr, spec);
 	e.hotlink.type = APIHotlink_Module;
 	e.hotlink.hotlinkNodeGuid = nodeGuid;

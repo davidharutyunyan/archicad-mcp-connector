@@ -15,6 +15,7 @@
 
 #include "APIEnvir.h"
 #include "ACAPinc.h"
+#include "Core/ApiCompat.hpp"
 #include "ObjectState.hpp"
 #include "UniString.hpp"
 #include "StringConversion.hpp"
@@ -51,6 +52,8 @@ OS						ErrorObject (GSErrCode code, const GS::UniString& message);
 GS::UniString			ToUni (const char* s);
 GS::String				ToStr (const GS::UniString& s);
 bool					EqualsIgnoreCase (const GS::UniString& a, const GS::UniString& b);
+// Case-insensitive substring test (GS::UniString::Contains has no case option: its 2nd parameter is a start index).
+bool					ContainsIgnoreCase (const GS::UniString& haystack, const GS::UniString& needle);
 
 // --- Readers (required variants throw a descriptive error when missing) ------
 

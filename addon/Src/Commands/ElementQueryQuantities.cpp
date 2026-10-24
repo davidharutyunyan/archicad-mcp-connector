@@ -659,7 +659,7 @@ void RegisterQuantityCommands ()
 						for (const API_CompositeQuantity& c : composites) {
 							list.Push (CompositeJson (c));
 							if (withTotals) {
-								MaterialTotals& mt = materialTotals[(Int32) c.buildMatIndices];
+								MaterialTotals& mt = materialTotals[AttrIndexToInt (c.buildMatIndices)];
 								mt.volume += c.volumes;
 								mt.projectedArea += c.projectedArea;
 							}
@@ -712,7 +712,7 @@ void RegisterQuantityCommands ()
 				if (!materialTotals.empty ()) {
 					GS::Array<OS> list;
 					for (const auto& kv : materialTotals) {
-						list.Push (OS ("buildingMaterial", AttrRef (API_BuildingMaterialID, kv.first),
+						list.Push (OS ("buildingMaterial", AttrRef (API_BuildingMaterialID, AttrIndexFromInt (kv.first)),
 									   "volume", kv.second.volume, "projectedArea", kv.second.projectedArea));
 					}
 					out.Add ("buildingMaterialTotals", list);

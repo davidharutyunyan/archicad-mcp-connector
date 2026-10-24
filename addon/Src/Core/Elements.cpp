@@ -330,23 +330,54 @@ bool ApplyOverriddenSurface (const OS& spec, const char* key, API_OverriddenAttr
 	if (spec.IsBool (key)) {
 		if (GetBool (spec, key))
 			Fail ("Field '" + GS::UniString (key) + "' must be a surface name/index, or false to remove the override.");
-		attr.overridden = false;
+		ClearOverridden (attr);
 		return true;
 	}
 	if (spec.IsString (key) && GetString (spec, key).IsEmpty ()) {
-		attr.overridden = false;
+		ClearOverridden (attr);
 		return true;
 	}
-	attr.attributeIndex = GetAttr (API_MaterialID, spec, key);
-	attr.overridden = true;
+	SetOverridden (attr, GetAttr (API_MaterialID, spec, key));
 	return true;
 }
 
 
 void AddOverriddenSurfaceJson (OS& out, const char* key, const API_OverriddenAttribute& attr)
 {
-	if (attr.overridden)
-		out.Add (key, AttrRef (API_MaterialID, attr.attributeIndex));
+	if (IsOverridden (attr))
+		out.Add (key, AttrRef (API_MaterialID, OverriddenIndex (attr)));
+}
+
+bool ApplyCutFillPens (const OS& spec, const CutFillPens& pens)
+{
+	bool changed = false;
+	auto one = [&] (const char* key, bool background) {
+		if (!spec.Contains (key))
+			return;
+		changed = true;
+		if (spec.IsBool (key)) {
+			if (GetBool (spec, key))
+				Fail ("Field '" + GS::UniString (key) + "' must be a pen index 1-255, or false to use the pen of the structure.");
+			pens.Clear (background);
+			return;
+		}
+		const Int32 pen = GetInt (spec, key);
+		if (pen < 1 || pen > 255)
+			Fail ("Field '" + GS::UniString (key) + "' must be a pen index 1-255, or false to use the pen of the structure.");
+		pens.Set (background, (short) pen);
+	};
+	one ("cutFillPen", false);
+	one ("cutFillBackgroundPen", true);
+	return changed;
+}
+
+
+void AddCutFillPensJson (OS& out, const CutFillPens& pens)
+{
+	if (pens.Has (false))
+		out.Add ("cutFillPen", (Int32) pens.Pen (false));
+	if (pens.Has (true))
+		out.Add ("cutFillBackgroundPen", (Int32) pens.Pen (true));
 }
 
 // --- Adapters ----------------------------------------------------------------------

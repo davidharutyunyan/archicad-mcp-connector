@@ -119,8 +119,9 @@ bool LooksLikeGuid (const GS::UniString& s)
 		t = t.GetSubstring (1, t.GetLength () - 2);
 	if (t.GetLength () != 36)
 		return false;
-	for (UIndex i = 0; i < t.GetLength (); ++i) {
-		const GS::UniChar::Layout c = GS::UniChar (t[i]);
+	const GS::UniString& chars = t;
+	for (UIndex i = 0; i < chars.GetLength (); ++i) {
+		const GS::UniChar::Layout c = GS::UniChar (chars[i]);
 		if (i == 8 || i == 13 || i == 18 || i == 23) {
 			if (c != '-')
 				return false;
@@ -842,7 +843,7 @@ fs::path FsPath (const GS::UniString& path)
 
 GS::UniString FromFsPath (const fs::path& p)
 {
-	return GS::UniString (p.u8string ().c_str (), CC_UTF8);
+	return GS::UniString (reinterpret_cast<const char*> (p.u8string ().c_str ()), CC_UTF8);
 }
 
 

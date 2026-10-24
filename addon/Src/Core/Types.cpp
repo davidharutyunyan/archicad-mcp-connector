@@ -227,49 +227,22 @@ const GS::Array<API_AttrTypeID>& AllAttrTypes ()
 }
 
 
-// Frees the data ACAPI_Attribute_Get allocates inside some attribute types.
-static void ReleaseAttributeData (API_AttrTypeID typeID, API_Attribute& attr)
-{
-	if (typeID == API_MaterialID && attr.material.texture.fileLoc != nullptr) {
-		delete attr.material.texture.fileLoc;
-		attr.material.texture.fileLoc = nullptr;
-	}
-	if (typeID == API_ModelViewOptionsID && attr.modelViewOpt.modelViewOpt.gdlOptions != nullptr)
-		ACAPI_FreeGDLModelViewOptionsPtr (&attr.modelViewOpt.modelViewOpt.gdlOptions);
-}
-
-
 GS::UniString AttrName (API_AttrTypeID typeID, API_AttributeIndex index)
 {
-	API_Attribute attr = {};
 	GS::UniString name;
-	attr.header.typeID = typeID;
-	attr.header.index = index;
-	attr.header.uniStringNamePtr = &name;
-	if (ACAPI_Attribute_Get (&attr) != NoError)
-		return GS::UniString ();
-	ReleaseAttributeData (typeID, attr);
-	return name;
+	return GetAttrHeader (typeID, index, &name, nullptr) ? name : GS::UniString ();
 }
 
 
 bool AttrExists (API_AttrTypeID typeID, API_AttributeIndex index)
 {
-	API_Attr_Head head = {};
-	head.typeID = typeID;
-	head.index = index;
-	API_Attribute attr = {};
-	attr.header = head;
-	GSErrCode err = ACAPI_Attribute_Get (&attr);
-	if (err == NoError)
-		ReleaseAttributeData (typeID, attr);
-	return err == NoError;
+	return GetAttrHeader (typeID, index, nullptr, nullptr);
 }
 
 
 std::optional<API_AttributeIndex> FindAttrByName (API_AttrTypeID typeID, const GS::UniString& name)
 {
-	{
+	if (!IsRelocatedAttrType (typeID)) {
 		API_Attr_Head head = {};
 		GS::UniString searchName = name;
 		head.typeID = typeID;
@@ -279,13 +252,11 @@ std::optional<API_AttributeIndex> FindAttrByName (API_AttrTypeID typeID, const G
 	}
 
 	// Fallback: case-insensitive scan.
-	API_AttributeIndex count = 0;
-	if (ACAPI_Attribute_GetNum (typeID, &count) != NoError)
-		return std::nullopt;
-	for (API_AttributeIndex i = 1; i <= count; ++i) {
-		GS::UniString n = AttrName (typeID, i);
+	const GS::Array<Int32> indices = AttrIndices (typeID);
+	for (const Int32 i : indices) {
+		GS::UniString n = AttrName (typeID, AttrIndexFromInt (i));
 		if (!n.IsEmpty () && EqualsIgnoreCase (n, name))
-			return i;
+			return AttrIndexFromInt (i);
 	}
 	return std::nullopt;
 }
@@ -293,18 +264,11 @@ std::optional<API_AttributeIndex> FindAttrByName (API_AttrTypeID typeID, const G
 
 static std::optional<API_AttributeIndex> FindAttrByGuid (API_AttrTypeID typeID, const API_Guid& guid)
 {
-	API_AttributeIndex count = 0;
-	if (ACAPI_Attribute_GetNum (typeID, &count) != NoError)
-		return std::nullopt;
-	for (API_AttributeIndex i = 1; i <= count; ++i) {
-		API_Attribute attr = {};
-		attr.header.typeID = typeID;
-		attr.header.index = i;
-		if (ACAPI_Attribute_Get (&attr) == NoError) {
-			ReleaseAttributeData (typeID, attr);
-			if (attr.header.guid == guid)
-				return i;
-		}
+	const GS::Array<Int32> indices = AttrIndices (typeID);
+	for (const Int32 i : indices) {
+		API_Guid g = APINULLGuid;
+		if (GetAttrHeader (typeID, AttrIndexFromInt (i), nullptr, &g) && g == guid)
+			return AttrIndexFromInt (i);
 	}
 	return std::nullopt;
 }
@@ -319,9 +283,9 @@ std::optional<API_AttributeIndex> OptAttr (API_AttrTypeID typeID, const OS& os, 
 
 	if (IsNumber (os, key)) {
 		Int32 idx = GetInt (os, key);
-		if (typeID != API_PenID && !AttrExists (typeID, idx))
+		if (typeID != API_PenID && !AttrExists (typeID, AttrIndexFromInt (idx)))
 			Fail (typeName + " attribute with index " + GS::ValueToUniString (idx) + " does not exist.", APIERR_BADINDEX);
-		return idx;
+		return AttrIndexFromInt (idx);
 	}
 	if (os.IsString (key)) {
 		GS::UniString name = GetString (os, key);
@@ -363,18 +327,15 @@ API_AttributeIndex GetAttr (API_AttrTypeID typeID, const OS& os, const char* key
 
 OS AttrRef (API_AttrTypeID typeID, API_AttributeIndex index)
 {
-	OS ref ("index", (Int32) index);
+	OS ref ("index", AttrIndexToInt (index));
 	if (typeID == API_PenID)
 		return ref;
-	API_Attribute attr = {};
 	GS::UniString name;
-	attr.header.typeID = typeID;
-	attr.header.index = index;
-	attr.header.uniStringNamePtr = &name;
-	if (ACAPI_Attribute_Get (&attr) == NoError) {
-		ReleaseAttributeData (typeID, attr);
+	API_Guid guid = APINULLGuid;
+	if (GetAttrHeader (typeID, index, &name, &guid)) {
 		ref.Add ("name", name);
-		ref.Add ("guid", GuidStr (attr.header.guid));
+		if (guid != APINULLGuid)
+			ref.Add ("guid", GuidStr (guid));
 	}
 	return ref;
 }
