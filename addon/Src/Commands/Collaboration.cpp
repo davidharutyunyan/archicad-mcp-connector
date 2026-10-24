@@ -96,12 +96,6 @@ GS::UniString Join (const GS::Array<GS::UniString>& items, const char* sep = ", 
 }
 
 
-bool ContainsIgnoreCase (const GS::UniString& haystack, const GS::UniString& needle)
-{
-	return haystack.ToLowerCase ().Contains (needle.ToLowerCase ());
-}
-
-
 // ISO 8601 UTC ("2024-05-01T12:30:00Z"); empty for 0.
 GS::UniString TimeString (GSTime t)
 {
@@ -413,7 +407,9 @@ const NamedValue kVariations[] = {
 	{ "Generic",		APIVarId_Generic },
 	{ "Object",			APIVarId_Object },
 	{ "Light",			APIVarId_Light },
+#if CC_AC_VERSION < 28
 	{ "SymbStair",		APIVarId_SymbStair },
+#endif
 	{ "GridElement",	APIVarId_GridElement },
 	{ "WallEnd",		APIVarId_WallEnd },
 	{ "Door",			APIVarId_Door },
@@ -1781,20 +1777,20 @@ OS AttachElements (const API_MarkUpType& issue, API_MarkUpComponentTypeID type, 
 	if (type == APIMarkUpComponent_Modification) {
 		GS::Array<OS> mods;
 		for (const auto& pair : table)
-			mods.Push (OS ("original", GuidStr (*pair.key), "modified", GuidStr (*pair.value)));
+			mods.Push (OS ("original", GuidStr (HashKeyOf (pair)), "modified", GuidStr (HashValueOf (pair))));
 		out.Add ("modificationPairs", mods);
 	}
 	return out;
 }
 
 
-GSErrCode __ACENV_CALL CollectIfcRelationshipData (GS::HashTable<API_Guid, API_IFCRelationshipData>* table, const void* par1)
+GSErrCode __ACENV_CALL CollectIfcRelationshipData (GS::HashTable<IfcRelationshipKey, API_IFCRelationshipData>* table, const void* par1)
 {
 	if (table == nullptr || par1 == nullptr)
 		return NoError;
 	const API_IFCRelationshipData* data = reinterpret_cast<const API_IFCRelationshipData*> (par1);
-	API_Guid ifcProjectId = APINULLGuid;
-	data->containmentTable.EnumerateValues ([&] (const API_Guid& value) {
+	IfcRelationshipKey ifcProjectId {};
+	data->containmentTable.EnumerateValues ([&] (const IfcRelationshipKey& value) {
 		if (!data->containmentTable.ContainsKey (value))
 			ifcProjectId = value;
 	});
@@ -2540,7 +2536,7 @@ void RegisterFavoriteCommands ()
 							return OS ("skip", true);
 					}
 					if (!folderFilter.IsEmpty ()) {
-						const API_FavoriteFolderHierarchy folder = fav.folder.HasValue () ? fav.folder.Get () : API_FavoriteFolderHierarchy ();
+						const API_FavoriteFolderHierarchy folder = fav.folder.HasValue () ? API_FavoriteFolderHierarchy (fav.folder.Get ()) : API_FavoriteFolderHierarchy ();
 						if (folder.GetSize () < folderFilter.GetSize ())
 							return OS ("skip", true);
 						for (UIndex i = 0; i < folderFilter.GetSize (); ++i) {
@@ -3270,11 +3266,11 @@ OS CustomDataJson (const GS::HashTable<API_Guid, GS::UniString>& data, const GS:
 	OS out;
 	for (const auto& pair : data) {
 		GS::UniString name;
-		if (!scheme.Get (*pair.key, &name) || name.IsEmpty ())
-			name = GuidStr (*pair.key);
+		if (!scheme.Get (HashKeyOf (pair), &name) || name.IsEmpty ())
+			name = GuidStr (HashKeyOf (pair));
 		const GS::String key = ToStr (name);
 		if (!out.Contains (key))
-			out.Add (key, *pair.value);
+			out.Add (key, HashValueOf (pair));
 	}
 	return out;
 }

@@ -55,7 +55,8 @@ struct LineStyleRefs {
 	API_AttributeIndex*		lineType = nullptr;
 	bool*					roomSeparator = nullptr;
 	short*					determination = nullptr;
-	API_ArrowData*			arrows = nullptr;			// nullptr: type has no arrows
+	API_ArrowData*			arrows = nullptr;			// nullptr: type has no arrows (Archicad 27+: the start arrow)
+	API_ArrowData*			endArrows = nullptr;		// Archicad 27+ only: the end arrow (26 has one record for both ends)
 	double*					penWeight = nullptr;
 };
 
@@ -64,8 +65,9 @@ void		ApplyLineStyle (API_Element& element, API_Element* mask, const OS& spec, c
 void		AddLineStyleJson (OS& out, const LineStyleRefs& refs);
 
 // Arrow data: {begin, end, type, size (mm), pen}
-void		ApplyArrows (API_Element& element, API_Element* mask, const OS& arrowsSpec, API_ArrowData& arrows);
-OS			ArrowsJson (const API_ArrowData& arrows);
+// endArrows: the separate end-arrow record of Archicad 27+ lines/arcs/polylines/splines (nullptr: labels and Archicad 26).
+void		ApplyArrows (API_Element& element, API_Element* mask, const OS& arrowsSpec, API_ArrowData& arrows, API_ArrowData* endArrows = nullptr);
+OS			ArrowsJson (const API_ArrowData& arrows, const API_ArrowData* endArrows = nullptr);
 
 // --- Errors --------------------------------------------------------------------------
 

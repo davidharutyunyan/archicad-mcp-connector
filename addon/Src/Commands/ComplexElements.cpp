@@ -77,39 +77,6 @@ bool ApplyAttrField (const OS& spec, const char* key, API_AttrTypeID type, API_A
 }
 
 
-static bool ApplyOnePenOverride (const OS& spec, const char* key, short& pen, bool& overridden)
-{
-	if (!spec.Contains (key))
-		return false;
-	if (spec.IsBool (key)) {
-		if (GetBool (spec, key))
-			Fail ("Field '" + GS::UniString (key) + "' must be a pen index 1-255, or false to remove the override.");
-		overridden = false;
-		return true;
-	}
-	ApplyPenField (spec, key, pen);
-	overridden = true;
-	return true;
-}
-
-
-bool ApplyCutFillPenOverride (const OS& spec, API_PenOverrideType& penOverride)
-{
-	bool changed = ApplyOnePenOverride (spec, "cutFillPen", penOverride.cutFillPen, penOverride.overrideCutFillPen);
-	changed = ApplyOnePenOverride (spec, "cutFillBackgroundPen", penOverride.cutFillBackgroundPen, penOverride.overrideCutFillBackgroundPen) || changed;
-	return changed;
-}
-
-
-void AddCutFillPenOverrideJson (OS& out, const API_PenOverrideType& penOverride)
-{
-	if (penOverride.overrideCutFillPen)
-		out.Add ("cutFillPen", (Int32) penOverride.cutFillPen);
-	if (penOverride.overrideCutFillBackgroundPen)
-		out.Add ("cutFillBackgroundPen", (Int32) penOverride.cutFillBackgroundPen);
-}
-
-
 void ApplyStoryCreationMode (API_LinkToSettings& link, const OS& spec)
 {
 	if (spec.Contains ("storyIndex")) {

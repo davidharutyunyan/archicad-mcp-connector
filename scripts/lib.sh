@@ -4,9 +4,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADDON_DIR="$REPO_ROOT/addon"
-BUILD_DIR="${ADDON_BUILD_DIR:-$ADDON_DIR/build}"
-BUNDLE_NAME="ClaudeConnector.bundle"
 ARCHICAD_VERSION="${ARCHICAD_VERSION:-26}"
+# addon/build for Archicad 26, addon/build-ac<version> for the others.
+if [[ "$ARCHICAD_VERSION" == 26 ]]; then DEFAULT_BUILD_DIR="$ADDON_DIR/build"; else DEFAULT_BUILD_DIR="$ADDON_DIR/build-ac$ARCHICAD_VERSION"; fi
+BUILD_DIR="${ADDON_BUILD_DIR:-$DEFAULT_BUILD_DIR}"
+BUNDLE_NAME="ClaudeConnector.bundle"
 ARCHICAD_PORT="${ARCHICAD_PORT:-19723}"
 
 # Archicad installation root, e.g. "/Applications/Graphisoft/Archicad 26"

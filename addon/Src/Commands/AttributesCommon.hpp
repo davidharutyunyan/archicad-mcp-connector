@@ -43,6 +43,18 @@ public:
 	GS::UniString	bmId;
 	GS::UniString	bmManufacturer;
 	GS::UniString	bmDescription;
+
+#if CC_AC_VERSION >= 27
+	// Archicad 27 moved pens, fonts, dimension standards and model view options out of API_Attribute
+	// (see IsRelocatedAttrType): Load fills attr.header (index, name, guid) and the matching record here.
+	API_Pen						pen {};
+	API_FontType				font {};
+	API_DimensionStandardsType	dimStand {};
+	API_ModelViewOptionsType	mvo {};
+
+private:
+	GSErrCode		LoadRelocated ();
+#endif
 };
 
 // --- RAII definition holder -------------------------------------------------------

@@ -138,4 +138,9 @@ void				ModifyElementFromPatch (const API_Guid& guid, const OS& patch);
 // Registers CreateElements, GetElementDetails, ModifyElements, GetSupportedElementTypes.
 void				RegisterGenericElementCommands ();
 
+// Cut fill pen overrides of model elements ("cutFillPen" / "cutFillBackgroundPen": pen 1..255, or false = the pen of
+// the structure). Use with CutFillPensOf (element). ApplyCutFillPens returns true when a field was given.
+bool				ApplyCutFillPens (const OS& spec, const CutFillPens& pens);
+void				AddCutFillPensJson (OS& out, const CutFillPens& pens);
+
 } // namespace cc

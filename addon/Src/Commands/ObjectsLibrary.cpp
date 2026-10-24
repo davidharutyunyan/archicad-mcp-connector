@@ -152,17 +152,6 @@ GS::UniString JoinNames (const GS::Array<GS::UniString>& names, const char* sep)
 }
 
 
-bool ContainsNoCase (const GS::UniString& haystack, const GS::UniString& needle)
-{
-	// NOTE: GS::UniString::Contains (str, from, range) has NO case-comparison parameter: passing
-	// GS::UniString::CaseInsensitive there means from = 1, which reads out of bounds on empty strings.
-	if (needle.IsEmpty ())
-		return true;
-	if (haystack.IsEmpty ())
-		return false;
-	return haystack.ToLowerCase ().Contains (needle.ToLowerCase ());
-}
-
 // --- Library parts ---------------------------------------------------------------------
 
 GSErrCode FetchLibPart (Int32 index, API_LibPart& lp, GS::UniString* path, IO::Location* loc)
@@ -669,7 +658,7 @@ GS::UniString ParamEditor::SimilarNames (const GS::UniString& name) const
 		GS::UniString desc (p.uDescname);
 		if (pname.IsEmpty () || name.IsEmpty ())
 			continue;
-		if (ContainsNoCase (pname, name) || ContainsNoCase (name, pname) || ContainsNoCase (desc, name))
+		if (ContainsIgnoreCase (pname, name) || ContainsIgnoreCase (name, pname) || ContainsIgnoreCase (desc, name))
 			similar.Push (pname);
 	}
 	if (similar.IsEmpty ())
@@ -826,7 +815,7 @@ void ParamEditor::ApplyValue (const OS& values, const char* key)
 			const std::optional<API_AttributeIndex> idx = FindAttrByName (*attrType, text);
 			if (!idx.has_value ())
 				Fail (AttrTypeName (*attrType) + " attribute named '" + text + "' (for GDL parameter '" + canonical + "') not found. Use get_attributes to list the localized names, or pass the attribute index.", APIERR_BADNAME);
-			value = (double) *idx;
+			value = (double) AttrIndexToInt (*idx);
 		} else {
 			// Numeric parameter with a VALUES list with descriptions: accept the description text.
 			bool matched = false;
@@ -1040,7 +1029,7 @@ GS::Array<OS> AddAttributeNames (API_AddParType** params, GS::Array<OS> items)
 		const std::optional<API_AttrTypeID> attrType = AttrTypeOfParam (p->typeID);
 		if (!attrType.has_value ())
 			continue;
-		const GS::UniString attrName = AttrName (*attrType, (API_AttributeIndex) std::lround (p->value.real));
+		const GS::UniString attrName = AttrName (*attrType, AttrIndexFromInt ((Int32) std::lround (p->value.real)));
 		if (!attrName.IsEmpty ())
 			items[i].Add ("valueName", attrName);
 	}
@@ -1317,7 +1306,7 @@ OS SearchLibraryParts (const OS& params)
 	std::stable_sort (hits.begin (), hits.end (), [] (const Hit& x, const Hit& y) {
 		if (x.rank != y.rank)
 			return x.rank < y.rank;
-		return x.item->name.IsLess (y.item->name, GS::UniString::CaseInsensitive);
+		return x.item->name.IsLess (y.item->name, CC_CASE_INSENSITIVE);
 	});
 
 	GS::Array<OS> list;
@@ -1404,12 +1393,12 @@ OS GetLibraryPartSubtypes (const OS& params)
 		for (Int32 i = (Int32) chain.GetSize () - 1; i >= 0; --i)
 			path += chain[(UIndex) i]->name + " > ";
 		path += it.name;
-		if (!query.IsEmpty () && !ContainsNoCase (path, query))
+		if (!query.IsEmpty () && !ContainsIgnoreCase (path, query))
 			continue;
 		entries.push_back ({ &it, path, (Int32) chain.GetSize () });
 	}
 	std::sort (entries.begin (), entries.end (), [] (const Entry& x, const Entry& y) {
-		return x.path.IsLess (y.path, GS::UniString::CaseInsensitive);
+		return x.path.IsLess (y.path, CC_CASE_INSENSITIVE);
 	});
 
 	GS::Array<OS> list;
@@ -1912,7 +1901,7 @@ double ScalarToParamReal (API_AddParID type, const OS& holder, const char* key, 
 			const std::optional<API_AttributeIndex> idx = FindAttrByName (*attrType, name);
 			if (!idx.has_value ())
 				Fail (AttrTypeName (*attrType) + " attribute named '" + name + "' (default of parameter '" + pname + "') not found. Use get_attributes, or pass an index.", APIERR_BADNAME);
-			return (double) *idx;
+			return (double) AttrIndexToInt (*idx);
 		}
 	}
 	Fail ("Default value of parameter '" + pname + "' (" + ParamTypeName (type) + ") must be a number" +
@@ -3208,7 +3197,7 @@ OS GetElementParams (const API_Guid& guid, const GS::Array<GS::UniString>& names
 			GS::UniString n, d;
 			item.Get ("name", n);
 			item.Get ("description", d);
-			if (!ContainsNoCase (n, search) && !ContainsNoCase (d, search))
+			if (!ContainsIgnoreCase (n, search) && !ContainsIgnoreCase (d, search))
 				continue;
 		}
 		items.Push (item);

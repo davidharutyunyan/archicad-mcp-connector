@@ -275,7 +275,7 @@ private:
 
 	const std::string& LayerName (API_AttributeIndex index)
 	{
-		auto it = layerCache.find ((Int32) index);
+		auto it = layerCache.find (AttrIndexToInt (index));
 		if (it != layerCache.end ())
 			return it->second;
 		std::string name = "0";
@@ -288,7 +288,7 @@ private:
 		std::transform (upper.begin (), upper.end (), upper.begin (), [] (unsigned char ch) { return (char) std::toupper (ch); });
 		if (layerSet.insert (upper).second)
 			layers.push_back (name);
-		return layerCache.emplace ((Int32) index, name).first->second;
+		return layerCache.emplace (AttrIndexToInt (index), name).first->second;
 	}
 
 	static int Color (short penIndex)

@@ -410,7 +410,7 @@ OS DimensionsJson (const API_DimensionPrefs& p)
 	out.Add ("area", AreaDimJson (p.area));
 	out.Add ("standardIndex", (Int32) p.index);
 	if (p.index > 0)
-		out.Add ("standard", AttrRef (API_DimStandID, p.index));
+		out.Add ("standard", AttrRef (API_DimStandID, AttrIndexFromInt (p.index)));
 	else
 		out.Add ("standard", GS::UniString ("Custom"));
 	return out;
@@ -481,12 +481,20 @@ OS SetDimensionsSection (const OS& patch)
 			wanted.index = 0;
 		} else {
 			const API_AttributeIndex idx = GetAttr (API_DimStandID, patch, "standard");
+#if CC_AC_VERSION >= 27
+			API_DimensionStandardsType standard = {};
+			standard.head.index = AttrIndexToInt (idx);
+			Check (ACAPI_Navigator_DimStand_Get (standard), "Cannot read the Dimension Standard");
+			wanted.index = (short) AttrIndexToInt (idx);
+			CopyDimFormats (wanted, standard.dim);		// the formats the standard defines
+#else
 			API_Attribute attr = {};
 			attr.header.typeID = API_DimStandID;
 			attr.header.index = idx;
 			Check (ACAPI_Attribute_Get (&attr), "Cannot read the Dimension Standard attribute");
 			wanted.index = (short) idx;
 			CopyDimFormats (wanted, attr.dimension.dim);		// the formats the standard defines
+#endif
 		}
 	}
 	const API_DimensionPrefs selected = wanted;
@@ -513,8 +521,8 @@ OS SetDimensionsSection (const OS& patch)
 	// Nothing worked: restore the original settings and explain.
 	API_DimensionPrefs restore = original;
 	SetPrefs (restore, APIPrefs_DimensionsID, "dimensions");
-	GS::UniString standardName = original.index > 0 ? AttrName (API_DimStandID, original.index) : GS::UniString ("Custom");
-	Fail ("Archicad 26 did not apply the dimension settings (it keeps the formats of the Dimension Standard '" + standardName +
+	GS::UniString standardName = original.index > 0 ? AttrName (API_DimStandID, AttrIndexFromInt (original.index)) : GS::UniString ("Custom");
+	Fail ("Archicad did not apply the dimension settings (it keeps the formats of the Dimension Standard '" + standardName +
 		  "'). Select another standard with 'standard', or change the formats in Options > Project Preferences > Dimensions.", APIERR_REFUSEDPAR);
 }
 

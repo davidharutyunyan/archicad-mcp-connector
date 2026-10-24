@@ -7,7 +7,8 @@ await t.ok("story 0", "set_current_story", { story: 0 });
 // library search
 const wins = await t.ok("search windows", "search_library_parts", { type: "Window", limit: 5 }, (j) => (j.libraryParts ?? j.items ?? j.results)?.length > 0);
 const doors = await t.ok("search doors", "search_library_parts", { type: "Door", limit: 5 });
-const objs = await t.ok("search objects 'стул' (chair)", "search_library_parts", { query: "стул", type: "Object", limit: 5 });
+const chairQuery = t.language === "RUS" ? "стул" : "chair";
+const objs = await t.ok(`search objects '${chairQuery}'`, "search_library_parts", { query: chairQuery, type: "Object", limit: 5 });
 const list = (j: any) => j?.libraryParts ?? j?.items ?? j?.results ?? [];
 const winName = list(wins)[0]?.name, doorName = list(doors)[0]?.name, chairName = list(objs)[0]?.name;
 console.log(`    window: ${winName} | door: ${doorName} | chair: ${chairName}`);

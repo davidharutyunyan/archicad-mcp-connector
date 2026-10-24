@@ -657,12 +657,31 @@ struct SaveFormat {
 	const char*		description;
 };
 
+// "Save as previous version": Archicad writes the file format of the version before it only.
+#if CC_AC_VERSION >= 29
+#define CC_PREVIOUS_VERSION		"28"
+#define CC_PREVIOUS_PLAN		APIFType_PlanFile2800
+#define CC_PREVIOUS_ARCHIVE		APIFType_A_PlanFile2800
+#elif CC_AC_VERSION >= 28
+#define CC_PREVIOUS_VERSION		"27"
+#define CC_PREVIOUS_PLAN		APIFType_PlanFile2700
+#define CC_PREVIOUS_ARCHIVE		APIFType_A_PlanFile2700
+#elif CC_AC_VERSION >= 27
+#define CC_PREVIOUS_VERSION		"26"
+#define CC_PREVIOUS_PLAN		APIFType_PlanFile2600
+#define CC_PREVIOUS_ARCHIVE		APIFType_A_PlanFile2600
+#else
+#define CC_PREVIOUS_VERSION		"25"
+#define CC_PREVIOUS_PLAN		APIFType_PlanFile2500
+#define CC_PREVIOUS_ARCHIVE		APIFType_A_PlanFile2500
+#endif
+
 const SaveFormat kSaveFormats[] = {
-	{ "pln",	APIFType_PlanFile,			"pln",	false,	"Archicad solo project" },
-	{ "pla",	APIFType_A_PlanFile,		"pla",	true,	"Archicad archive (project + embedded library parts)" },
-	{ "tpl",	APIFType_PlanFile,			"tpl",	false,	"Archicad template (written in project format with a .tpl extension)" },
-	{ "pln25",	APIFType_PlanFile2500,		"pln",	false,	"Archicad 25 project (save as previous version)" },
-	{ "pla25",	APIFType_A_PlanFile2500,	"pla",	true,	"Archicad 25 archive (save as previous version)" },
+	{ "pln",						APIFType_PlanFile,		"pln",	false,	"Archicad solo project" },
+	{ "pla",						APIFType_A_PlanFile,	"pla",	true,	"Archicad archive (project + embedded library parts)" },
+	{ "tpl",						APIFType_PlanFile,		"tpl",	false,	"Archicad template (written in project format with a .tpl extension)" },
+	{ "pln" CC_PREVIOUS_VERSION,	CC_PREVIOUS_PLAN,		"pln",	false,	"Archicad " CC_PREVIOUS_VERSION " project (save as previous version)" },
+	{ "pla" CC_PREVIOUS_VERSION,	CC_PREVIOUS_ARCHIVE,	"pla",	true,	"Archicad " CC_PREVIOUS_VERSION " archive (save as previous version)" },
 };
 
 
@@ -673,7 +692,8 @@ const SaveFormat& ResolveSaveFormat (const std::optional<GS::UniString>& format,
 			if (EqualsIgnoreCase (*format, f.name))
 				return f;
 		}
-		Fail ("Unknown format '" + *format + "'. Allowed: pln, pla, tpl, pln25, pla25 (IFC/DWG/PDF/images: use the export tools).");
+		Fail ("Unknown format '" + *format + "'. Allowed: pln, pla, tpl, pln" CC_PREVIOUS_VERSION ", pla" CC_PREVIOUS_VERSION
+			  " (this Archicad saves as previous version only to Archicad " CC_PREVIOUS_VERSION "; IFC/DWG/PDF/images: use the export tools).");
 	}
 	if (ext.IsEmpty () || ext == "pln")
 		return kSaveFormats[0];
@@ -773,7 +793,9 @@ GSErrCode OpenProjectFile (IO::Location& loc, API_FTypeID type, IO::Location* ar
 	API_FileOpenPars fop = {};
 	fop.fileTypeID = type;
 	fop.useStoredLib = true;
+#if CC_AC_VERSION < 29
 	fop.enableSaveAlert = false;
+#endif
 	fop.file = &loc;
 	if (archiveLib != nullptr) {
 		fop.libGiven = true;
@@ -831,7 +853,9 @@ OS NewProject (const OS& params)
 	} else {
 		API_NewProjectPars npp = {};
 		npp.newAndReset = GetBool (params, "reset", false);
+#if CC_AC_VERSION < 29
 		npp.enableSaveAlert = false;
+#endif
 		err = ACAPI_Automate (APIDo_NewProjectID, &npp);
 	}
 	if (err == APIERR_REFUSEDCMD)
@@ -976,7 +1000,7 @@ void RegisterProjectCommands ()
 
 	RegisterCommand ("SaveProjectAs",
 		"Saves the project under a new path (File > Save As; the open project then refers to the new file). "
-		"Input: {path (absolute), format?: pln|pla|tpl|pln25|pla25 (default from extension), overwrite?, createFolders?, "
+		"Input: {path (absolute), format?: pln|pla|tpl|pln" CC_PREVIOUS_VERSION "|pla" CC_PREVIOUS_VERSION " (default from extension), overwrite?, createFolders?, "
 		"archive?: {includeTextures, includeBackgroundPictures, includePropertyObjects, includeAllLibraryParts, picturesInTIFF}}.",
 		SaveProjectAs);
 

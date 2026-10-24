@@ -83,14 +83,6 @@ std::optional<GS::UniString> OptText (const OS& os, const char* key)
 }
 
 
-// NOTE: GS::UniString::Contains (str, from, range) has no case flag: passing CaseInsensitive (= 1) as the
-// second argument silently starts the search at index 1.
-bool ContainsIgnoreCase (const GS::UniString& text, const GS::UniString& part)
-{
-	return text.ToLowerCase ().Contains (part.ToLowerCase ());
-}
-
-
 void SetUStr (GS::uchar_t* dst, Int32 capacity, const GS::UniString& value, const char* field)
 {
 	if ((Int32) value.GetLength () >= capacity) {
@@ -410,9 +402,9 @@ OS ZoneRelationsJson (const API_Guid& guid)
 	OS grouped;
 	for (auto it = guard.rel.elementsGroupedByType.EnumeratePairs (); it != nullptr; ++it) {
 		GS::Array<GS::UniString> guids;
-		for (const API_Guid& g : *it->value)
+		for (const API_Guid& g : HashValueOf (*it))
 			guids.Push (GuidStr (g));
-		grouped.Add (ToStr (ElemTypeName (*it->key)), guids);
+		grouped.Add (ToStr (ElemTypeName (HashKeyOf (*it))), guids);
 	}
 	out.Add ("elementsByType", grouped);
 
@@ -1123,7 +1115,7 @@ bool NaturalLess (const GS::UniString& a, const GS::UniString& b)
 		return na < nb;
 	if (numA != numB)
 		return numA;		// numbered zones first
-	return a.Compare (b, GS::UniString::CaseInsensitive) == GS::UniString::Less;
+	return a.Compare (b, CC_CASE_INSENSITIVE) == GS::UniString::Less;
 }
 
 

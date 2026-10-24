@@ -142,7 +142,7 @@ void SetBit (unsigned short& bits, unsigned short bit, bool on)
 void ApplyRunStyle (StyledRun& r, const OS& spec)
 {
 	if (auto p = OptPen (spec, "pen"))					r.pen = *p;
-	if (auto f = OptAttr (API_FontID, spec, "font"))	r.font = (short) *f;
+	if (auto f = OptAttr (API_FontID, spec, "font"))	r.font = (short) AttrIndexToInt (*f);
 	if (auto s = OptPositive (spec, "size"))			r.size = *s;
 	if (auto b = OptBool (spec, "bold"))				SetBit (r.faceBits, APIFace_Bold, *b);
 	if (auto b = OptBool (spec, "italic"))				SetBit (r.faceBits, APIFace_Italic, *b);
@@ -178,7 +178,7 @@ void AddRunStyle (OS& out, short pen, short font, unsigned short faceBits, unsig
 {
 	out.Add ("pen", (Int32) pen);
 	if (fontRef)
-		out.Add ("font", AttrRef (API_FontID, font));
+		out.Add ("font", AttrRef (API_FontID, AttrIndexFromInt (font)));
 	else
 		out.Add ("font", (Int32) font);
 	out.Add ("size", size);
@@ -194,8 +194,12 @@ void AddRunStyle (OS& out, short pen, short font, unsigned short faceBits, unsig
 
 void KillTextMemo (API_ElementMemo& memo)
 {
+#if CC_AC_VERSION >= 28
+	delete memo.textContent;		// Archicad 28+: a GS::UniString allocated with new
+#else
 	if (memo.textContent != nullptr)
 		BMKillHandle (reinterpret_cast<GSHandle*> (&memo.textContent));
+#endif
 	if (memo.paragraphs != nullptr)
 		ACAPI_DisposeParagraphsHdl (&memo.paragraphs);
 	if (memo.textLineStarts != nullptr)
@@ -227,11 +231,15 @@ bool MemoTextIsEmpty (const API_ElementMemo& memo)
 {
 	if (memo.textContent == nullptr)
 		return true;
+#if CC_AC_VERSION >= 28
+	return memo.textContent->IsEmpty ();
+#else
 	const GSSize size = BMGetHandleSize (reinterpret_cast<GSConstHandle> (memo.textContent));
 	if (size <= 0)
 		return true;
 	const unsigned char* b = reinterpret_cast<const unsigned char*> (*memo.textContent);
 	return b[0] == 0 && (size < 2 || b[1] == 0);
+#endif
 }
 
 
@@ -281,10 +289,14 @@ void WriteTextContent (API_ElementMemo& memo, API_TextType& t, const std::vector
 
 	KillTextMemo (memo);
 
+#if CC_AC_VERSION >= 28
+	memo.textContent = new GS::UniString (reinterpret_cast<const GS::UniChar::Layout*> (full.data ()), (USize) full.size ());
+#else
 	memo.textContent = BMAllocateHandle ((GSSize) ((full.size () + 1) * sizeof (GS::uchar_t)), ALLOCATE_CLEAR, 0);
 	if (memo.textContent == nullptr)
 		Fail ("Out of memory.", APIERR_MEMFULL);
 	std::memcpy (*memo.textContent, full.data (), full.size () * sizeof (GS::uchar_t));
+#endif
 
 	const Int32 nPar = (Int32) pars.size ();
 	memo.paragraphs = reinterpret_cast<API_ParagraphType**> (BMAllocateHandle ((GSSize) (nPar * sizeof (API_ParagraphType)), ALLOCATE_CLEAR, 0));
@@ -334,7 +346,9 @@ void WriteTextContent (API_ElementMemo& memo, API_TextType& t, const std::vector
 	t.size = first.size;
 	t.just = just;
 	t.spacing = spacing;
-	t.charCode = CC_UniCode;
+#if CC_AC_VERSION < 28
+	t.charCode = CC_UniCode;		// Archicad 28+ texts are always Unicode
+#endif
 	t.multiStyle = true;
 	t.useEolPos = false;			// let Archicad compute the line breaks
 	t.nLine = nPar;
@@ -369,6 +383,17 @@ TextContent DecodeTextMemo (const API_ElementMemo& memo, const API_TextType& t, 
 	std::vector<GS::uchar_t> units;		// UTF-16 units when utf16, else bytes widened
 	std::vector<char> bytes;
 	bool utf16 = preferUtf16;
+#if CC_AC_VERSION >= 28
+	(void) &LooksLikeUtf16;
+	utf16 = true;		// Archicad 28+: the content is a GS::UniString (UTF-16)
+	if (memo.textContent != nullptr) {
+		const GS::UniString& str = *memo.textContent;
+		const auto ustr = str.ToUStr ();
+		const GS::UniChar::Layout* p = ustr.Get ();
+		for (UIndex i = 0; p != nullptr && i < str.GetLength (); ++i)
+			units.push_back (p[i]);
+	}
+#else
 	if (memo.textContent != nullptr) {
 		const GSSize size = BMGetHandleSize (reinterpret_cast<GSConstHandle> (memo.textContent));
 		const unsigned char* b = reinterpret_cast<const unsigned char*> (*memo.textContent);
@@ -384,6 +409,7 @@ TextContent DecodeTextMemo (const API_ElementMemo& memo, const API_TextType& t, 
 				bytes.push_back ((char) b[i]);
 		}
 	}
+#endif
 	const Int32 unitCount = utf16 ? (Int32) units.size () : (Int32) bytes.size ();
 	auto substring = [&] (Int32 from, Int32 to) -> GS::UniString {
 		from = std::max<Int32> (0, std::min (from, unitCount));
@@ -523,7 +549,9 @@ void MaskContentFields (API_Element& e, API_Element* mask, API_TextType& t)
 	MaskField (mask, e, t.size);
 	MaskField (mask, e, t.just);
 	MaskField (mask, e, t.spacing);
+#if CC_AC_VERSION < 28
 	MaskField (mask, e, t.charCode);
+#endif
 	MaskField (mask, e, t.multiStyle);
 	MaskField (mask, e, t.useEolPos);
 	MaskField (mask, e, t.nLine);
@@ -840,7 +868,7 @@ void ApplySymbolLabelStyle (API_Element& e, API_Element* mask, const OS& spec)
 	if (Has (spec, "runs") || Has (spec, "text"))
 		Fail ("Symbol labels take their text from the library part: remove 'text' / 'runs' (or use labelClass 'Text').");
 	if (auto p = OptPen (spec, "pen"))					{ l.u.symbol.pen = *p; MaskField (mask, e, l.u.symbol.pen); }
-	if (auto f = OptAttr (API_FontID, spec, "font"))	{ l.font = (short) *f; MaskField (mask, e, l.font); }
+	if (auto f = OptAttr (API_FontID, spec, "font"))	{ l.font = (short) AttrIndexToInt (*f); MaskField (mask, e, l.font); }
 	if (auto s = OptPositive (spec, "size"))			{ l.textSize = *s; MaskField (mask, e, l.textSize); }
 	unsigned short effects = (unsigned short) l.effectsBits;
 	bool faceChanged = false, effectsChanged = false;
@@ -1088,7 +1116,7 @@ void SerializeLabel (const API_Element& e, OS& out)
 		OS lpJson = Try ([&] () -> OS { return LibPartToJson (GetLibPartByIndex (sym.libInd)); });
 		out.Add ("libraryPart", lpJson);
 		out.Add ("pen", (Int32) sym.pen);
-		out.Add ("font", AttrRef (API_FontID, l.font));
+		out.Add ("font", AttrRef (API_FontID, AttrIndexFromInt (l.font)));
 		out.Add ("size", l.textSize);
 		out.Add ("bold", (l.faceBits & APIFace_Bold) != 0);
 		out.Add ("italic", (l.faceBits & APIFace_Italic) != 0);

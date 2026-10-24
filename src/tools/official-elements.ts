@@ -335,6 +335,7 @@ export function registerOfficialElementTools(server: McpServer, ctx: ToolContext
       const guids = zones.map(refGuid);
       const params: Json = { zones: elementIdItems(guids) };
       if (elementTypes) params["elementTypes"] = elementTypes;
+      else if ((await ac.archicadVersion()) >= 29) params["elementTypes"] = ["All"]; // required since Archicad 29
       const res = await ac.api<{ elementsRelatedToZones?: unknown[] }>("API.GetElementsRelatedToZones", params);
       const list = res.elementsRelatedToZones ?? [];
       const perZone = guids.map((g, i): { zone: string; error?: string; related?: string[] } => {

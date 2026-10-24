@@ -187,7 +187,9 @@ StoryList LoadStoryList ()
 		StoryRec rec;
 		rec.index = s.index;
 		rec.floorId = s.floorId;
-		rec.notMine = s.notMine;
+	#if CC_AC_VERSION < 27
+	rec.notMine = s.notMine;
+#endif
 		rec.dispOnSections = s.dispOnSections;
 		rec.level = s.level;
 		rec.name = NameFromBuffer (s.uName);

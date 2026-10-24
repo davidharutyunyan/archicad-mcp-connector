@@ -32,6 +32,9 @@ export const projectTiming = {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** "Save as previous version" formats; Archicad N writes only the one of version N-1. */
+const SAVE_PREVIOUS_FORMATS = ["pln25", "pla25", "pln26", "pla26", "pln27", "pla27", "pln28", "pla28"] as const;
+
 type Json = Record<string, unknown>;
 
 /** Drops undefined values so only the fields the caller gave reach the add-on. */
@@ -491,11 +494,15 @@ export function registerProjectTools(server: McpServer, ctx: ToolContext): void 
     title: "Save project as",
     description:
       "Saves the project under a new file (File > Save As). Afterwards the open project refers to the NEW file. Formats: pln (solo project), " +
-      "pla (archive incl. library parts), tpl (template), pln25/pla25 (Archicad 25 = previous version). The format defaults to the path " +
+      "pla (archive incl. library parts), tpl (template), previous / previous-archive (the previous Archicad version, the only one Archicad " +
+        "can save back to: Archicad 26 -> pln25/pla25, 27 -> pln26/pla26, 28 -> pln27/pla27, 29 -> pln28/pla28). The format defaults to the path " +
       "extension; a missing extension is added. For IFC/DWG/PDF/image exports use the export tools instead. Returns {saved, format, file, project}.",
     input: {
       path: z.string().min(2).describe("Absolute target path on the Archicad machine, e.g. '/Users/me/Projects/House.pln'"),
-      format: z.enum(["pln", "pla", "tpl", "pln25", "pla25"]).optional().describe("File format (default: from the extension, else pln)"),
+      format: z
+        .enum(["pln", "pla", "tpl", "previous", "previous-archive", ...SAVE_PREVIOUS_FORMATS])
+        .optional()
+        .describe("File format (default: from the extension, else pln). 'previous' = project, 'previous-archive' = archive of the previous version"),
       overwrite: z.boolean().optional().describe("Replace an existing file (default false: fails if the file exists)"),
       createFolders: z.boolean().optional().describe("Create missing parent folders (default false)"),
       archive: z
@@ -508,10 +515,17 @@ export function registerProjectTools(server: McpServer, ctx: ToolContext): void 
         })
         .strict()
         .optional()
-        .describe("Options for pla/pla25 archives"),
+        .describe("Options for pla and previous-version archives"),
     },
     annotations: MODIFIES,
-    handler: async (args, { ac }) => ac.addon("SaveProjectAs", compact(args), { timeoutMs: projectTiming.longOperationMs }),
+    handler: async (args, { ac }) => {
+      const params = compact(args);
+      if (args.format === "previous" || args.format === "previous-archive") {
+        const previous = (await ac.archicadVersion()) - 1;
+        params["format"] = `${args.format === "previous" ? "pln" : "pla"}${previous}`;
+      }
+      return ac.addon("SaveProjectAs", params, { timeoutMs: projectTiming.longOperationMs });
+    },
   });
 
   defineTool(server, ctx, {

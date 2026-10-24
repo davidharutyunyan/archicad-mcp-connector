@@ -70,7 +70,7 @@ API_Attr_Head LoadAttrHead (API_AttrTypeID typeID, API_AttributeIndex index, GS:
 	attr.header.typeID = typeID;
 	attr.header.index = index;
 	attr.header.uniStringNamePtr = &name;
-	CheckWithHint (ACAPI_Attribute_Get (&attr), "Cannot read " + AttrTypeName (typeID) + " attribute #" + NumberToString ((double) index));
+	CheckWithHint (ACAPI_Attribute_Get (&attr), "Cannot read " + AttrTypeName (typeID) + " attribute #" + NumberToString ((double) AttrIndexToInt (index)));
 	if (typeID == API_MaterialID && attr.material.texture.fileLoc != nullptr) {
 		delete attr.material.texture.fileLoc;
 		attr.material.texture.fileLoc = nullptr;
@@ -92,7 +92,7 @@ GS::Array<Target> ReadAttributeTargets (const OS& os)
 		t.kind = Target::Attribute;
 		t.attrHead = LoadAttrHead (typeID, index, name);
 		t.guid = t.attrHead.guid;
-		OS attrRef ("type", AttrTypeName (typeID), "index", (Int32) index, "name", name, "guid", GuidStr (t.attrHead.guid));
+		OS attrRef ("type", AttrTypeName (typeID), "index", AttrIndexToInt (index), "name", name, "guid", GuidStr (t.attrHead.guid));
 		t.ref = OS ("attribute", attrRef);
 		t.label = AttrTypeName (typeID) + " '" + name + "'";
 		targets.Push (t);

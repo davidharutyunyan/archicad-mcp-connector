@@ -5,6 +5,8 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
@@ -24,6 +26,10 @@ export class LiveTest {
   passed = 0;
   failed = 0;
   failures: string[] = [];
+  /** Main version of the Archicad under test (26, 27, ...). */
+  version = 26;
+  /** Archicad language code (RUS, INT, GER, ...): library part and attribute names are localized. */
+  language = "RUS";
 
   constructor(readonly name: string) {}
 
@@ -33,6 +39,13 @@ export class LiveTest {
     await server.connect(b);
     this.client = new Client({ name: "live", version: "1" });
     await this.client.connect(a);
+    const info = await this.raw("execute_json_api_command", { command: "API.GetProductInfo" });
+    if (typeof info.json?.version === "number") this.version = info.json.version;
+    if (typeof info.json?.languageCode === "string") this.language = info.json.languageCode;
+    console.log(`  (Archicad ${this.version} ${this.language})`);
+    // The newer international templates hide some default tool layers (e.g. 'Shell - General') in the active layer
+    // combination; elements created there could not be cleaned up. Start every suite with all layers shown and unlocked.
+    if (this.version >= 27) await this.raw("set_layer_states", { layers: [{ match: "*", hidden: false, locked: false }] });
     return this;
   }
 
@@ -113,6 +126,22 @@ export class LiveTest {
     await this.client.close();
     process.exitCode = this.failed ? 1 : 0;
   }
+}
+
+/** Scratch folder for files the tests write or read (on the machine that runs Archicad and the tests). */
+export function testDir(...sub: string[]): string {
+  const dir = join(tmpdir(), "claude-connector-tests", ...sub);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** A small red PNG written to the test folder; returns its absolute path. */
+export function redPng(): string {
+  const file = join(testDir(), "red.png");
+  const png =
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR42mP4z8BAEmIY1TCqYfhqAACQ+f8B8u7oVwAAAABJRU5ErkJggg==";
+  writeFileSync(file, Buffer.from(png, "base64"));
+  return file;
 }
 
 /** Collects {error: {message}} items from typical batch results ({results:[...]}, {elements:[...]}, ...). */

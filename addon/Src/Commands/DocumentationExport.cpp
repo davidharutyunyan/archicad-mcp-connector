@@ -244,7 +244,7 @@ OS ExportIfc (const OS& params)
 		for (int pass = 0; pass < 3 && chosen == MaxUIndex; ++pass) {
 			for (UIndex i = 0; i < translators.GetSize (); ++i) {
 				const GS::UniString& n = translators[i].name;
-				const bool hit = pass == 0 ? n == *want : pass == 1 ? EqualsIgnoreCase (n, *want) : n.Contains (*want, GS::UniString::CaseInsensitive);
+				const bool hit = pass == 0 ? n == *want : pass == 1 ? EqualsIgnoreCase (n, *want) : ContainsIgnoreCase (n, *want);
 				if (hit) {
 					chosen = i;
 					break;
@@ -292,7 +292,13 @@ OS ExportIfc (const OS& params)
 	}
 
 	API_SavePars_Ifc pars {};
+#if CC_AC_VERSION >= 27
+	if (EqualsIgnoreCase (format, "ifcxml"))
+		Fail ("ifcXML export was removed in Archicad 27: use format 'ifc' (.ifc).", APIERR_NOTSUPPORTED);
+	pars.subType = API_IFC;
+#else
 	pars.subType = EqualsIgnoreCase (format, "ifcxml") ? API_IFCXML : API_IFC;
+#endif
 	pars.translatorIdentifier = translators[chosen];
 	pars.elementsToIfcExport = scope;
 	pars.elementsSet = scope == API_FilteredElements ? &elements : nullptr;

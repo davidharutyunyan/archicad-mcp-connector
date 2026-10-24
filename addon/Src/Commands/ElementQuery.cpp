@@ -152,17 +152,17 @@ bool IsHierarchicalType (API_ElemTypeID typeID)
 
 GS::UniString NameCache::LayerName (API_AttributeIndex index)
 {
-	if (const GS::UniString* cached = layers.GetPtr ((Int32) index))
+	if (const GS::UniString* cached = layers.GetPtr (AttrIndexToInt (index)))
 		return *cached;
 	GS::UniString name = AttrName (API_LayerID, index);
-	layers.Put ((Int32) index, name);
+	layers.Put (AttrIndexToInt (index), name);
 	return name;
 }
 
 
 OS NameCache::Layer (API_AttributeIndex index)
 {
-	return OS ("index", (Int32) index, "name", LayerName (index));
+	return OS ("index", AttrIndexToInt (index), "name", LayerName (index));
 }
 
 
@@ -635,7 +635,7 @@ QueryFilter ParseFilter (const OS& params)
 		GS::HashSet<Int32> set;
 		for (const OS& item : layerItems) {
 			if (auto l = OptAttr (API_LayerID, item, "v"))
-				set.Add ((Int32) *l);
+				set.Add (AttrIndexToInt (*l));
 		}
 		f.layers = set;
 	}
@@ -799,7 +799,7 @@ GS::Array<Match> RunQuery (const QueryFilter& f, QueryStats& stats, NameCache& n
 			continue;
 		if (f.stories.has_value () && !f.stories->Contains ((Int32) head.floorInd))
 			continue;
-		if (f.layers.has_value () && !f.layers->Contains ((Int32) head.layer))
+		if (f.layers.has_value () && !f.layers->Contains (AttrIndexToInt (head.layer)))
 			continue;
 		if (f.renovation.has_value () && !f.renovation->Contains ((Int32) head.renovationStatus))
 			continue;
@@ -1001,7 +1001,7 @@ void RegisterFindCommands ()
 				const std::string key = TypeKey (m.head.type);
 				Increment (byType, key);
 				if (byStory) Increment (storyTypes[(Int32) m.head.floorInd], key);
-				if (byLayer) Increment (layerTypes[(Int32) m.head.layer], key);
+				if (byLayer) Increment (layerTypes[AttrIndexToInt (m.head.layer)], key);
 				if (byReno)  Increment (renoCounts, std::string (ToStr (RenovationStatusName (m.head.renovationStatus)).ToCStr ()));
 			}
 
@@ -1029,7 +1029,7 @@ void RegisterFindCommands ()
 				std::sort (order.begin (), order.end (), [] (const auto& a, const auto& b) { return a.second > b.second; });
 				GS::Array<OS> list;
 				for (const auto& lt : order) {
-					list.Push (OS ("layer", names.Layer (lt.first), "total", lt.second,
+					list.Push (OS ("layer", names.Layer (AttrIndexFromInt (lt.first)), "total", lt.second,
 								   "byType", CountsToJson (layerTypes[lt.first])));
 				}
 				out.Add ("byLayer", list);
@@ -1218,7 +1218,7 @@ void RegisterSelectionCommands ()
 				} else {
 					// Retry one by one to find the elements that cannot be (de)selected.
 					for (const API_Neig& n : neigs) {
-						GSErrCode e = ACAPI_Element_Select ({ n }, add);
+						GSErrCode e = ACAPI_Element_Select (GS::Array<API_Neig> { n }, add);
 						if (e == NoError)
 							++applied;
 						else

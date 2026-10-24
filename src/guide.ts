@@ -8,11 +8,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-export const SERVER_INSTRUCTIONS = `Archicad connector: full read/write control of a running Graphisoft Archicad 26 project.
+export const SERVER_INSTRUCTIONS = `Archicad connector: full read/write control of a running Graphisoft Archicad project (Archicad 26, 27, 28 or 29; archicad_status shows which).
 - Call get_connector_guide once before building or editing anything non-trivial: conventions, workflows, recipes, limits.
 - Units: meters and DEGREES. Project coordinates (x right, y up on the plan, z up); elevations are relative to the element's home story.
 - Elements are referenced by GUID. Stories by index (0 = ground floor), name, {floorId} or {displayNumber}.
-- Attribute and library part names are LOCALIZED (this Archicad may be Russian): look them up with get_attributes / search_library_parts, never guess.
+- Attribute and library part names are LOCALIZED (e.g. Russian or English Archicad): look them up with get_attributes / search_library_parts, never guess.
 - Walls: referenceLine 'Outside' = outer face, body to the RIGHT of begin→end: draw exterior walls CLOCKWISE. Slab 'level' = top surface.
 - Batch: every create/modify tool takes arrays, runs as one undo step '... (Claude)' and returns [{guid} | {error}] per item.
 - Verify with get_element_details / get_element_quantities and LOOK with capture_view (3D axonometric, floor plan, sections).

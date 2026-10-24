@@ -1,4 +1,4 @@
-import { LiveTest, guids, near } from "./lib.js";
+import { LiveTest, guids, near, redPng } from "./lib.js";
 
 const t = await new LiveTest("drafting-dims-complex").start();
 const X = 400;
@@ -19,7 +19,7 @@ t.check("text content round-trip", JSON.stringify(txd).includes("Вторая с
 const w = await t.ok("wall for label", "create_walls", { walls: [{ begin: { x: X, y: 25 }, end: { x: X + 6, y: 25 }, height: 3 }] });
 await t.ok("create_labels associative + free", "create_labels", { labels: [{ parent: guids(w)[0], text: "Wall label" }, { begin: { x: X, y: 30 }, text: "Free label" }] });
 await t.ok("create_hotspots", "create_hotspots", { hotspots: [{ position: { x: X + 1, y: 32 }, height: 1 }] });
-await t.ok("create_pictures", "create_pictures", { pictures: [{ file: "/private/tmp/claude-connector-tests/red.png", position: { x: X, y: 34 }, width: 2, height: 2 }] });
+await t.ok("create_pictures", "create_pictures", { pictures: [{ file: redPng(), position: { x: X, y: 34 }, width: 2, height: 2 }] });
 await t.ok("modify line via modify_elements", "modify_elements", { elements: [{ guid: guids(ln)[0], end: { x: X + 6, y: 0 } }] });
 
 // Element ID: Archicad has none for lines/polylines/texts/labels/dimensions/...; hatches have one.

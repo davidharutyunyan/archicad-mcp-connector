@@ -13,7 +13,6 @@ cmake_minimum_required (VERSION 3.16)
 # -----------------------------------------------------------------------------
 
 set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set (CMAKE_OSX_DEPLOYMENT_TARGET 10.15)
 if (NOT CMAKE_OSX_ARCHITECTURES)
 	set (CMAKE_OSX_ARCHITECTURES "${CMAKE_HOST_SYSTEM_PROCESSOR}" CACHE STRING "" FORCE)
 endif ()
@@ -35,6 +34,15 @@ if (EXISTS ${ACAPINC_FILE_LOCATION})
 	message (STATUS "Archicad Version: ${ARCHICAD_VERSION}")
 else ()
 	message (FATAL_ERROR "Archicad API DevKit not found at ${AC_API_DEVKIT_DIR}. Run scripts/fetch-devkit.sh first.")
+endif ()
+
+# Archicad 27 reorganized the API (C++20, new functions, new library layout); 26 is the original target.
+if (ARCHICAD_VERSION GREATER_EQUAL 27)
+	set (AC_MODERN_API ON)
+	set (CMAKE_OSX_DEPLOYMENT_TARGET 11.0)
+else ()
+	set (AC_MODERN_API OFF)
+	set (CMAKE_OSX_DEPLOYMENT_TARGET 10.15)
 endif ()
 
 if (WIN32)
@@ -154,8 +162,26 @@ target_include_directories (AddOn PUBLIC
 	${AC_API_DEVKIT_DIR}/Support/Inc
 )
 
-target_compile_features (AddOn PUBLIC cxx_std_17)
-if (WIN32)
+target_compile_definitions (AddOn PUBLIC CC_AC_VERSION=${ARCHICAD_VERSION})
+if (AC_MODERN_API)
+	target_compile_features (AddOn PUBLIC cxx_std_20)
+else ()
+	target_compile_features (AddOn PUBLIC cxx_std_17)
+endif ()
+if (ARCHICAD_VERSION GREATER_EQUAL 29)
+	# As in the Archicad 29 DevKit examples: the GS allocator headers are force-included into every source file.
+	# (Not on 27: its GSMalloc.hpp turns realloc into a macro that breaks the C++ standard library headers.)
+	get_filename_component (GSNewHeader "${AC_API_DEVKIT_DIR}/Support/Modules/GSRoot/GSNew.hpp" REALPATH)
+	get_filename_component (GSMallocHeader "${AC_API_DEVKIT_DIR}/Support/Modules/GSRoot/GSMalloc.hpp" REALPATH)
+	if (WIN32)
+		target_compile_options (AddOn PRIVATE "SHELL:/FI \"${GSNewHeader}\"" "SHELL:/FI \"${GSMallocHeader}\"")
+	else ()
+		target_compile_options (AddOn PRIVATE "SHELL:-include \"${GSNewHeader}\"" "SHELL:-include \"${GSMallocHeader}\"")
+	endif ()
+endif ()
+if (WIN32 AND AC_MODERN_API)
+	target_link_libraries (AddOn "${AC_API_DEVKIT_DIR}/Support/Lib/ACAP_STAT.lib")
+elseif (WIN32)
 	target_link_libraries (AddOn
 		"$<$<CONFIG:Debug>:${AC_API_DEVKIT_DIR}/Support/Lib/Win/ACAP_STATD.lib>"
 		"$<$<NOT:$<CONFIG:Debug>>:${AC_API_DEVKIT_DIR}/Support/Lib/Win/ACAP_STAT.lib>"
@@ -172,7 +198,11 @@ if (WIN32)
 	target_compile_definitions (AddOn PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS $<$<CONFIG:Debug>:DEBUG>)
 else ()
 	find_library (CocoaFramework Cocoa)
-	target_link_libraries (AddOn "${AC_API_DEVKIT_DIR}/Support/Lib/Mactel/libACAP_STAT.a" ${CocoaFramework})
+	if (AC_MODERN_API)
+		target_link_libraries (AddOn "${AC_API_DEVKIT_DIR}/Support/Lib/libACAP_STAT.a" ${CocoaFramework})
+	else ()
+		target_link_libraries (AddOn "${AC_API_DEVKIT_DIR}/Support/Lib/Mactel/libACAP_STAT.a" ${CocoaFramework})
+	endif ()
 	target_compile_options (AddOn PUBLIC -Wall -Wextra -fvisibility=hidden
 	-Wno-multichar
 	-Wno-ctor-dtor-privacy
@@ -198,6 +228,7 @@ else ()
 	-Wno-nontrivial-memcall
 	-Wno-cast-function-type-mismatch
 	-Wno-unknown-warning-option
+	-Wno-shorten-64-to-32
 	)
 endif ()
 add_dependencies (AddOn AddOnResources)
@@ -215,17 +246,29 @@ function (GetModuleNameFromModuleFolderName module folder)
 	set (${module} ${result} PARENT_SCOPE)
 endfunction ()
 
+if (AC_MODERN_API)
+	# Archicad 27+: link every framework (macOS) / every import library of every module (Windows), as the examples do.
+	if (WIN32)
+		file (GLOB GSLinkLibs "${AC_API_DEVKIT_DIR}/Support/Modules/*/Win/*.lib")
+	else ()
+		file (GLOB GSLinkLibs "${AC_API_DEVKIT_DIR}/Support/Frameworks/*.framework")
+	endif ()
+	target_link_libraries (AddOn ${GSLinkLibs})
+endif ()
+
 file (GLOB GSModuleDirs RELATIVE "${AC_API_DEVKIT_DIR}/Support/Modules" "${AC_API_DEVKIT_DIR}/Support/Modules/*")
 foreach (folder ${GSModuleDirs})
 	if (IS_DIRECTORY "${AC_API_DEVKIT_DIR}/Support/Modules/${folder}")
 		target_include_directories (AddOn PUBLIC "${AC_API_DEVKIT_DIR}/Support/Modules/${folder}")
 		GetModuleNameFromModuleFolderName (module ${folder})
-		if (WIN32)
+		if (AC_MODERN_API)
+			set (ModuleLibPath "")	# linked above
+		elseif (WIN32)
 			set (ModuleLibPath "${AC_API_DEVKIT_DIR}/Support/Modules/${folder}/Win/${module}Imp.lib")
 		else ()
 			set (ModuleLibPath "${AC_API_DEVKIT_DIR}/Support/Frameworks/${module}.framework")
 		endif ()
-		if (EXISTS ${ModuleLibPath})
+		if (ModuleLibPath AND EXISTS ${ModuleLibPath})
 			target_link_libraries (AddOn ${ModuleLibPath})
 		endif ()
 	endif ()

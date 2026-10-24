@@ -107,8 +107,6 @@ bool			ApplyAngleDeg (const OS& spec, const char* key, double& radians);
 void			CheckCompositeUsage (const OS& spec, API_AttributeIndex composite, short usageFlag, const char* elementPlural);
 
 // "cutFillPen" / "cutFillBackgroundPen": pen index, or false to remove the override.
-bool			ApplyPenOverride (const OS& spec, API_PenOverrideType& po);
-void			AddPenOverrideJson (OS& out, const API_PenOverrideType& po);
 
 // "storyVisibility": {onHomeStory, allAbove, allBelow, storiesAbove, storiesBelow} (applied to contour and fill).
 bool			ApplyStoryVisibility (const OS& spec, API_StoryVisibility& contour, API_StoryVisibility& fill);

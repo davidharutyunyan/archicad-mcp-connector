@@ -197,6 +197,11 @@ export const OpeningFields = {
   connectionMode: z.enum(["Connected", "Disconnected"]).optional().describe("Floor plan connection mode"),
   outlinesStyle: z.enum(["HideBorder", "ShowUncutBorder", "ShowOverheadBorder"]).optional().describe("Floor plan outline style"),
   showReferenceAxis: z.boolean().optional().describe("Show the opening's reference axis on the floor plan"),
+  cutElements: z
+    .array(Guid)
+    .max(100)
+    .optional()
+    .describe("Archicad 29+: further elements the opening cuts besides its owner (e.g. a wall lining, a second slab)"),
   ...HostStoryCommonFields,
 };
 export const OpeningSpec = z.object(OpeningFields);
@@ -240,6 +245,9 @@ const ModifyOpeningPatch = z
     fixMode: z.enum(["Horizontal", "Vertical"]).optional().describe("Skylights"),
     azimuthAngle: z.number().optional().describe("Skylights: rotation in degrees (clockwise)"),
     pivotVertexId: z.number().int().min(0).optional().describe("Skylights on multi-plane roofs"),
+    owner: Guid.optional().describe("Openings (Opening tool), Archicad 29+: move the opening into another host element"),
+    addCutElements: z.array(Guid).max(100).optional().describe("Openings, Archicad 29+: also cut these elements"),
+    removeCutElements: z.array(Guid).max(100).optional().describe("Openings, Archicad 29+: stop cutting these elements (not the owner)"),
     bottomElevation: z.number().optional().describe("Openings: bottom edge elevation above the home story (m)"),
     anchorAltitude: z.number().optional().describe("Openings: anchor point elevation above the home story (m)"),
     shape: z.enum(["Rectangular", "Circular"]).optional().describe("Openings"),

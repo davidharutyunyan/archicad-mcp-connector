@@ -64,7 +64,7 @@ void AddShape (ProfileVectorImage& image, const OS& shape, UIndex shapeIndex)
 	const API_BuildingMaterialType& b = bm.attr.buildingMaterial;
 
 	const short contourPen = OptPen (shape, "contourPen").value_or (b.cutFillPen >= 1 ? b.cutFillPen : (short) 1);
-	const API_AttributeIndex contourLine = OptRef (API_LinetypeID, shape, "contourLineType").value_or (1);
+	const API_AttributeIndex contourLine = OptRef (API_LinetypeID, shape, "contourLineType").value_or (AttrIndexFromInt (1));
 	const short cutEndPen = OptPen (shape, "cutEndLinePen").value_or (contourPen);
 	const API_AttributeIndex cutEndLine = OptRef (API_LinetypeID, shape, "cutEndLineType").value_or (contourLine);
 	const bool contourVisible = GetBool (shape, "contourVisible", true);
@@ -89,15 +89,15 @@ void AddShape (ProfileVectorImage& image, const OS& shape, UIndex shapeIndex)
 
 	ProfileItem* item = new (*addInfo) ProfileItem ();
 	item->SetCutEndLinePen (cutEndPen);
-	item->SetCutEndLineType (cutEndLine);
+	item->SetCutEndLineType (ToModuleAttrIndex (cutEndLine));
 	item->SetVisibleCutEndLines (true);
 	item->SetCore (core);
 	item->SetFinish (finish);
 
 	ProfileEdgeData* edges = reinterpret_cast<ProfileEdgeData*> (*addInfo + sizeof (ProfileItem));
-	new (&edges[0]) ProfileEdgeData (0, 0, 0, 0);
+	new (&edges[0]) ProfileEdgeData (ToModuleAttrIndex (AttrIndexFromInt (0)), 0, ToModuleAttrIndex (AttrIndexFromInt (0)), 0);
 	for (Int32 i = 1; i <= nCoords; ++i) {
-		new (&edges[i]) ProfileEdgeData (b.cutMaterial, contourPen, contourLine,
+		new (&edges[i]) ProfileEdgeData (ToModuleAttrIndex (b.cutMaterial), contourPen, ToModuleAttrIndex (contourLine),
 										 ProfileEdgeData::IsVisibleLineFlag | ProfileEdgeData::SurfaceFromBuildMatFlag);
 	}
 
@@ -108,9 +108,9 @@ void AddShape (ProfileVectorImage& image, const OS& shape, UIndex shapeIndex)
 	try {
 		image.AddHatchObsolete (contourVisible,
 								VBAttr::ExtendedPen (contourPen),
-								contourLine,
-								bmIndex,
-								b.cutFill,
+								ToModuleAttrIndex (contourLine),
+								ToModuleAttrIndex (bmIndex),
+								ToModuleAttrIndex (b.cutFill),
 								VBAttr::OverriddenExtendedPen (VBAttr::DoNotUseThisAttribute, VBAttr::ExtendedPen (b.cutFillPen)),
 								VBAttr::OverriddenPen (VBAttr::DoNotUseThisAttribute, b.cutFillBackgroundPen),
 								hatchTrafo,
@@ -160,8 +160,13 @@ void SetProfileImage (API_AttributeDefExt& defs, ProfileVectorImage* image)
 
 void AddProfileGeometryJson (const ProfileVectorImage& image, OS& out)
 {
+#if CC_AC_VERSION >= 27
+	const Box2DData box = image.GetBounds (true);
+	if (box.xMax >= box.xMin && box.yMax >= box.yMin) {
+#else
 	Box2DData box;
 	if (image.GetBounds (&box, true) == NoError && box.xMax >= box.xMin && box.yMax >= box.yMin) {
+#endif
 		out.Add ("width", box.xMax - box.xMin);
 		out.Add ("height", box.yMax - box.yMin);
 		OS bounds ("xMin", box.xMin, "yMin", box.yMin, "xMax", box.xMax);

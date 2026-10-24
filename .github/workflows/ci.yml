@@ -51,18 +51,28 @@ jobs:
   # add-ons are built with a placeholder ID (licensed Archicad would not load them) and no artifact is uploaded.
   # Never store a borrowed ID there: the artifacts are downloadable by anyone who can see the workflow runs.
   addon-macos:
-    name: Archicad 26 add-on (macOS, universal)
+    name: Archicad ${{ matrix.archicad }} add-on (macOS, universal)
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { archicad: 26, devkit: "26.3000" }
+          - { archicad: 27, devkit: "27.6003" }
+          - { archicad: 28, devkit: "28.4001" }
+          - { archicad: 29, devkit: "29.3100" }
     env:
       AC_MDID_DEVELOPER: ${{ secrets.AC_MDID_DEVELOPER }}
       AC_MDID_LOCAL: ${{ secrets.AC_MDID_LOCAL }}
+      ARCHICAD_VERSION: ${{ matrix.archicad }}
+      BUILD_DIR: addon/build-ac${{ matrix.archicad }}
     steps:
       - uses: actions/checkout@v7
       - name: Cache the Archicad API DevKit
         uses: actions/cache@v6
         with:
           path: .devkit/*.zip
-          key: archicad-devkit-26.3000
+          key: archicad-devkit-mac-${{ matrix.devkit }}
       - name: Fetch the DevKit
         run: bash scripts/fetch-devkit.sh
       - name: Install Ninja
@@ -71,27 +81,35 @@ jobs:
         run: |
           MDID=()
           if [[ -n "$AC_MDID_DEVELOPER" && -n "$AC_MDID_LOCAL" ]]; then MDID=(-DAC_MDID_DEVELOPER="$AC_MDID_DEVELOPER" -DAC_MDID_LOCAL="$AC_MDID_LOCAL"); fi
-          cmake -S addon -B addon/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DAC_API_DEVKIT_DIR="$PWD/.devkit/devkit26" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" "${MDID[@]}"
+          cmake -S addon -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DAC_API_DEVKIT_DIR="$PWD/.devkit/devkit$ARCHICAD_VERSION" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" "${MDID[@]}"
       - name: Build
-        run: cmake --build addon/build
+        run: cmake --build "$BUILD_DIR"
       - name: Check the bundle
         run: |
-          BIN=addon/build/ClaudeConnector.bundle/Contents/MacOS/ClaudeConnector
+          BIN="$BUILD_DIR/ClaudeConnector.bundle/Contents/MacOS/ClaudeConnector"
           lipo -info "$BIN"
           lipo "$BIN" -verify_arch arm64 x86_64
       - name: Upload the add-on
         if: env.AC_MDID_DEVELOPER != '' && env.AC_MDID_LOCAL != ''
         uses: actions/upload-artifact@v7
         with:
-          name: ClaudeConnector-macOS-universal
-          path: addon/build/ClaudeConnector.bundle
+          name: ClaudeConnector-AC${{ matrix.archicad }}-macOS-universal
+          path: ${{ env.BUILD_DIR }}/ClaudeConnector.bundle
 
   addon-windows:
-    name: Archicad 26 add-on (Windows, x64)
-    # Archicad 26 add-ons need the Visual Studio 2019 toolset (v142): windows-2025 ships Visual Studio 2022 with it,
-    # the newer Visual Studio 2026 images do not.
+    name: Archicad ${{ matrix.archicad }} add-on (Windows, x64)
+    # Archicad 26-28 add-ons need the Visual Studio 2019 toolset (v142), Archicad 29 the Visual Studio 2022 one (v143):
+    # windows-2025 ships Visual Studio 2022 with both, the newer Visual Studio 2026 images lack v142.
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { archicad: 26, devkit: "26.3000" }
+          - { archicad: 27, devkit: "27.6003" }
+          - { archicad: 28, devkit: "28.4001" }
+          - { archicad: 29, devkit: "29.3100" }
     env:
       AC_MDID_DEVELOPER: ${{ secrets.AC_MDID_DEVELOPER }}
       AC_MDID_LOCAL: ${{ secrets.AC_MDID_LOCAL }}
@@ -101,14 +119,14 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .devkit/*.zip
-          key: archicad-devkit-win-26.3000
+          key: archicad-devkit-win-${{ matrix.devkit }}
       - name: Build (scripts/windows/build-addon.ps1)
         shell: pwsh
-        run: ./scripts/windows/build-addon.ps1 -MdidDeveloper "$env:AC_MDID_DEVELOPER" -MdidLocal "$env:AC_MDID_LOCAL"
+        run: ./scripts/windows/build-addon.ps1 -ArchicadVersion ${{ matrix.archicad }} -MdidDeveloper "$env:AC_MDID_DEVELOPER" -MdidLocal "$env:AC_MDID_LOCAL"
       - name: Check the add-on
         shell: pwsh
         run: |
-          $apx = "addon\build-win\Release\ClaudeConnector.apx"
+          $apx = "addon\build-win-ac${{ matrix.archicad }}\Release\ClaudeConnector.apx"
           $bytes = [IO.File]::ReadAllBytes($apx)
           $machine = [BitConverter]::ToUInt16($bytes, [BitConverter]::ToInt32($bytes, 0x3C) + 4)
           if ($machine -ne 0x8664) { throw ("Not an x64 binary (machine 0x{0:X})" -f $machine) }
@@ -124,5 +142,5 @@ jobs:
         if: env.AC_MDID_DEVELOPER != '' && env.AC_MDID_LOCAL != ''
         uses: actions/upload-artifact@v7
         with:
-          name: ClaudeConnector-Windows-x64
-          path: addon/build-win/Release/ClaudeConnector.apx
+          name: ClaudeConnector-AC${{ matrix.archicad }}-Windows-x64
+          path: addon/build-win-ac${{ matrix.archicad }}/Release/ClaudeConnector.apx

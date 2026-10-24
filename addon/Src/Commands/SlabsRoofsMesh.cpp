@@ -201,7 +201,7 @@ void ApplyMeshFields (API_Element& element, API_Element* mask, const OS& spec)
 	if (ApplyPen (spec, "levelLinePen", mesh.levelPen))						m.Set (&mesh.levelPen);
 	if (ApplyAttr (spec, "contourLineType", API_LinetypeID, mesh.ltypeInd))	m.Set (&mesh.ltypeInd);
 	if (ApplyPen (spec, "cutContourPen", mesh.sectContPen))					m.Set (&mesh.sectContPen);
-	if (ApplyPenOverride (spec, mesh.penOverride))							m.Set (&mesh.penOverride);
+	if (ApplyCutFillPens (spec, CutFillPensOf (mesh)))						ForCutFillPenFields (mesh, [&] (auto& field) { m.Set (&field); });
 	if (ApplyFlag (spec, "showCoverFill", mesh.useFloorFill))				m.Set (&mesh.useFloorFill);
 	if (ApplyAttr (spec, "coverFill", API_FilltypeID, mesh.floorFillInd))	m.Set (&mesh.floorFillInd);
 	if (ApplyPen (spec, "coverFillPen", mesh.floorFillPen))					m.Set (&mesh.floorFillPen);
@@ -267,7 +267,7 @@ void SerializeMesh (const API_Element& element, OS& out)
 	out.Add ("levelLinePen", (Int32) mesh.levelPen);
 	out.Add ("contourLineType", AttrRef (API_LinetypeID, mesh.ltypeInd));
 	out.Add ("cutContourPen", (Int32) mesh.sectContPen);
-	AddPenOverrideJson (out, mesh.penOverride);
+	AddCutFillPensJson (out, CutFillPensOf (mesh));
 	out.Add ("showCoverFill", mesh.useFloorFill);
 	out.Add ("coverFill", AttrRef (API_FilltypeID, mesh.floorFillInd));
 	out.Add ("coverFillPen", (Int32) mesh.floorFillPen);

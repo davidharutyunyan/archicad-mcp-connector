@@ -44,9 +44,16 @@ const ifExistsInput = IfExists.optional().describe(
 
 /** Attribute types that have folders in Archicad 26 (others fail or even trip assertions in Archicad). */
 export const FOLDER_TYPES = new Set(["Layer", "Composite", "Profile", "Surface", "BuildingMaterial"]);
+/** Archicad 27 added folders to the other attribute types except pens, fonts, dimension standards and model view options. */
+const NO_FOLDER_TYPES_27 = new Set(["Pen", "Font", "DimensionStandard", "ModelViewOption"]);
 
-function checkFolders(type: string, items: Record<string, unknown>[]): void {
-  if (FOLDER_TYPES.has(type)) return;
+function checkFolders(type: string, items: Record<string, unknown>[], version: number): void {
+  if (version >= 27 ? !NO_FOLDER_TYPES_27.has(type) : FOLDER_TYPES.has(type)) return;
+  if (version >= 27) {
+    const bad27 = items.findIndex((i) => i["folder"] !== undefined);
+    if (bad27 >= 0) throw new Error(`Item ${bad27}: ${type} attributes cannot be put in folders. Remove 'folder'.`);
+    return;
+  }
   const bad = items.findIndex((i) => i["folder"] !== undefined);
   if (bad >= 0) {
     throw new Error(
@@ -63,7 +70,7 @@ async function createAttributes(
   ifExists: string | undefined,
   undoName: string,
 ): Promise<unknown> {
-  checkFolders(type, items);
+  checkFolders(type, items, await ctx.ac.archicadVersion());
   const params: Record<string, unknown> = { type, attributes: items, undoName };
   if (ifExists) params["ifExists"] = ifExists;
   return ctx.ac.addon("CreateAttributes", params);
@@ -400,7 +407,8 @@ export function registerAttributeTools(server: McpServer, ctx: ToolContext): voi
     },
     annotations: MODIFIES,
     handler: async ({ attributes, undoName }, { ac }) => {
-      for (const a of attributes) checkFolders(a.type, [a]);
+      const version = await ac.archicadVersion();
+      for (const a of attributes) checkFolders(a.type, [a], version);
       return ac.addon("ModifyAttributes", {
         attributes: attributes.map((a) => (a.type === "Fill" ? normalizeFillPercent(a) : a)),
         ...(undoName ? { undoName } : {}),

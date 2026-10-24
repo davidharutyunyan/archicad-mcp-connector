@@ -9,6 +9,8 @@
 //   arcAngle (curved wall, 0 = straight), referenceLine ("Outside"|"Center"|"Inside"|
 //   "CoreOutside"|"CoreCenter"|"CoreInside"), flipped, offset (base line offset from ref line),
 //   buildingMaterial | composite | profile, refSurface / oppSurface / sideSurface (overrides),
+//     NOTE: a composite or complex profile fixes the thickness, so "thickness" without one of these three
+//     turns a Composite / Profile wall (e.g. the template's default wall) into a Basic one with its building material,
 //   zoneRelation ("Boundary"|"ReduceArea"|"None"), slantAlpha, slantBeta (degrees),
 //   + common: layer, storyIndex, renovationStatus, elementId
 // *****************************************************************************
@@ -81,6 +83,13 @@ void ApplyWallFields (API_WallType& wall, API_Element* mask, const OS& spec)
 		if (wall.modelElemStructureType == API_ProfileStructure) {
 			wall.profileType = APISect_Poly; WALL_SET (profileType);
 		} else if (wall.profileType == APISect_Poly) {
+			wall.profileType = APISect_Normal; WALL_SET (profileType);
+		}
+	}
+	if (Has (spec, "thickness") && !Has (spec, "buildingMaterial") && !Has (spec, "composite") && !Has (spec, "profile") &&
+		wall.modelElemStructureType != API_BasicStructure) {
+		wall.modelElemStructureType = API_BasicStructure; WALL_SET (modelElemStructureType); WALL_SET (buildingMaterial);
+		if (wall.profileType == APISect_Poly) {
 			wall.profileType = APISect_Normal; WALL_SET (profileType);
 		}
 	}

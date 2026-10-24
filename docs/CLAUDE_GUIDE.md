@@ -1,8 +1,9 @@
 # Archicad Connector — guide for Claude
 
-You are driving a **live Graphisoft Archicad 26** instance. Every tool call changes or reads the real project the user sees.
-This guide tells you how the connector thinks, the conventions that make results correct on the first try, the working loop,
-worked recipes, and the known limits of the Archicad 26 API. `get_connector_guide` returns this document.
+You are driving a **live Graphisoft Archicad** instance (version 26, 27, 28 or 29 — `archicad_status` tells you which).
+Every tool call changes or reads the real project the user sees. This guide tells you how the connector thinks, the
+conventions that make results correct on the first try, the working loop, worked recipes, and the known limits of the
+Archicad API. `get_connector_guide` returns this document.
 
 ---
 
@@ -140,7 +141,7 @@ elements: `create_labels {"labels": [{"parent": "<guid>", "text": "..."}]}`.
    `publish_publisher_set` (the template's layout set writes one multi-page PDF of the whole Layout Book).
 
 ### 4.9 Engineering plans (electrical, plumbing)
-Archicad 26's API cannot create MEP Modeler parts (pipes, ducts, cable trays fail with APIERR_BADPARS), so model the
+The Archicad API (26) cannot create MEP Modeler parts (pipes, ducts, cable trays fail with APIERR_BADPARS), so model the
 systems with ordinary elements on the template's MEP layers (`MEP - Электрооборудование.ЭО`, `MEP - Водоснабжение и Канализация.ВК`):
 * **Pipes**: circular beams (`diameter` makes the section circular), e.g. `create_beams {"beams": [{"begin": …, "end": …,
   "diameter": 0.11, "level": -0.45, "anchor": "Center", "slantAngle": -1.15, "buildingMaterial": "Пластик",
@@ -179,7 +180,16 @@ parameters later with `set_gdl_parameters`. Read existing parts' scripts with `g
 * Review loop: `create_issue {"issues": [{"name": "Check stair headroom", "comment": "...", "attach": {"highlight": [...]}}]}`,
   `export_bcf`, `import_bcf`.
 
-## 5. Gotchas and limits of Archicad 26
+## 5. Gotchas and limits
+
+* **Version differences** (the tools are the same on every version):
+  * Archicad 27+: every attribute type except pens, fonts, dimension standards and model view options can be put in
+    folders (26: layers, composites, profiles, surfaces, building materials only).
+  * Archicad 29: IFC data is read-only — `set_ifc_properties` fails; store the data as Archicad properties or
+    classifications and let the IFC translator map them. MEP systems are no longer attributes. Openings (Opening
+    tool) can be moved to another host (`modify_openings {owner}`) and cut further elements (`cutElements`,
+    `addCutElements`, `removeCutElements`).
+  * Save as previous version: `save_project_as {format: "previous"}` (Archicad N writes version N-1 only).
 
 * **Names are localized** — copy them from `get_attributes` / `search_library_parts`; partial names produce "Did you mean ..." hints.
 * **Locked elements/layers**: edits fail with an actionable message; `unlock_elements` or `set_layer_states {"layers": [{"layer": "...", "locked": false, "hidden": false}]}`.
@@ -202,21 +212,21 @@ parameters later with `set_gdl_parameters`. Read existing parts' scripts with `g
   * They are built from a saved view's settings: change the view, not the drawing. `set_view_settings {view}` opens the
     view once so new drawings pick the change up.
   * Drawings already placed keep their old scale and crop. Re-place them (`place_drawing` + `delete_drawings`).
-    `update_drawings` can report "UpToDate" while showing old content.
+    On Archicad 26 `update_drawings` can report "UpToDate" while showing old content; 27+ updates drawings directly.
   * A drawing's frame (the crop polygon, also present on unclipped drawings) is what `bounds`, the anchor and the
     drawing title follow.
 * **Layout Book**: layout IDs come from the subset numbering. Renaming an auto-numbered subset's ID does not last;
   create the subset with custom numbering (§4.5) and `move_navigator_item` the layouts into it. A subset's numbering
   cannot be changed after creation.
 * **Text labels** (`create_labels` without a parent's auto text) are single-line unless you give `wrapWidth`.
-* **Undo/redo** use Archicad's Edit menu (the AC26 API has none): they act on the whole undo history, and they work on
+* **Undo/redo** use Archicad's Edit menu (the Archicad API has none): they act on the whole undo history, and they work on
   macOS only (on Windows they report that they are not available — fix mistakes with modify/delete calls instead).
 * **Paths** are absolute paths on the Archicad machine: `/Users/me/Desktop/plan.pdf` on macOS,
   `C:\Users\me\Desktop\plan.pdf` on Windows.
 * **Render**: `render_view` uses the CineRender engine; if it returns a blank image (warning in the result) use `capture_view` of the 3D window.
-* **DWG**: Archicad 26's API cannot write DWG; `export_dwg` writes DXF (any CAD opens it) and converts to .dwg only if the ODA File Converter is installed.
+* **DWG**: the Archicad API cannot write DWG; `export_dwg` writes DXF (any CAD opens it) and converts to .dwg only if the ODA File Converter is installed.
 * **Stairs, railings, curtain walls**: their base line/path cannot be changed after creation (re-create them); curtain wall grids need at least one flexible module (default: the first).
-* **Openings** cannot be placed into polygonal walls; the host of an existing opening cannot be changed.
+* **Openings** cannot be placed into polygonal walls; the host of an existing opening can be changed on Archicad 29 only.
 * **Project operations** (`open_project`, `new_project`, `close_project`, `quit_archicad`) need an explicit `saveFirst` or `discardChanges`; closing the project or quitting ends API access until the user reopens a project.
 * **Teamwork** tools report "not a Teamwork project" on solo projects.
 * **Anything missing?** `list_addon_commands` + `execute_addon_command`, or `execute_json_api_command` for official `API.*` commands.

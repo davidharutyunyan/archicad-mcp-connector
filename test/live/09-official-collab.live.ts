@@ -1,5 +1,8 @@
-import { LiveTest, guids } from "./lib.js";
+import { LiveTest, guids, testDir } from "./lib.js";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
+
+const TMP = testDir();
 
 const t = await new LiveTest("official-collab").start();
 const X = 800;
@@ -60,14 +63,14 @@ await t.ok("get_issue_comments", "get_issue_comments", { issues: ["LT Issue"] })
 await t.ok("attach_elements_to_issue", "attach_elements_to_issue", { issue: "LT Issue", elements: wg.slice(1, 2), type: "Modification" });
 await t.ok("get_issue_elements", "get_issue_elements", { issues: ["LT Issue"] }, (j) => JSON.stringify(j).includes(wg[1]!));
 await t.ok("detach_elements_from_issue", "detach_elements_from_issue", { issue: "LT Issue", elements: wg.slice(1, 2) }).catch(() => {});
-await t.ok("export_bcf", "export_bcf", { path: "/private/tmp/claude-connector-tests/issues.bcfzip", overwrite: true }, () => existsSync("/private/tmp/claude-connector-tests/issues.bcfzip") || "bcf missing");
+await t.ok("export_bcf", "export_bcf", { path: join(TMP, "issues.bcfzip"), overwrite: true }, () => existsSync(join(TMP, "issues.bcfzip")) || "bcf missing");
 await t.ok("delete_issue", "delete_issue", { issues: ["LT Issue"] });
-await t.ok("import_bcf", "import_bcf", { path: "/private/tmp/claude-connector-tests/issues.bcfzip" });
+await t.ok("import_bcf", "import_bcf", { path: join(TMP, "issues.bcfzip") });
 await t.ok("get_favorites", "get_favorites", {});
 await t.ok("create_favorite from element", "create_favorite", { favorites: [{ name: "LT Fav Wall", element: wg[0] }] });
 await t.ok("apply_favorite to defaults", "apply_favorite", { name: "LT Fav Wall", target: "Defaults" });
 await t.ok("rename_favorite", "rename_favorite", { name: "LT Fav Wall", newName: "LT Fav Wall 2" });
-await t.ok("export_favorites", "export_favorites", { path: "/private/tmp/claude-connector-tests/favs.prf", names: ["LT Fav Wall 2"], overwrite: true });
+await t.ok("export_favorites", "export_favorites", { path: join(TMP, "favs.prf"), names: ["LT Fav Wall 2"], overwrite: true });
 await t.ok("delete_favorite", "delete_favorite", { names: ["LT Fav Wall 2"] });
 const td = await t.ok("get_tool_defaults Wall", "get_tool_defaults", { type: "Wall" }, (j) => JSON.stringify(j).includes("thickness"));
 await t.ok("set_tool_defaults Wall thickness", "set_tool_defaults", { defaults: [{ type: "Wall", fields: { thickness: 0.37, height: 3.1 } }] });

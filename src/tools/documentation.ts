@@ -339,10 +339,10 @@ export function registerDocumentationTools(server: McpServer, ctx: ToolContext):
     name: "update_drawings",
     title: "Update drawings from their views",
     description:
-      "Refreshes placed drawings from their source views: pass drawing guids, layouts, or all: true. Archicad 26 has no direct update call, so " +
-      "the connector opens each affected layout (Archicad refreshes outdated auto-update drawings when a layout is shown), temporarily switching " +
-      "manual-update drawings to automatic (includeManual, default true). Returns per drawing statusBefore / statusAfter (UpToDate | Modified | " +
-      "Unknown) and counts. Publishing a set (publish_publisher_set) also updates the drawings it contains.",
+      "Refreshes placed drawings from their source views: pass drawing guids, layouts, or all: true. Archicad 27+ updates them directly; " +
+      "Archicad 26 has no update call, so there the connector opens each affected layout (Archicad refreshes outdated auto-update drawings when " +
+      "a layout is shown), temporarily switching manual-update drawings to automatic (includeManual, default true). Returns per drawing " +
+      "statusBefore / statusAfter (UpToDate | Modified | Unknown) and counts. Publishing a set (publish_publisher_set) also updates the drawings it contains.",
     input: {
       drawings: z.array(ElementRef).min(1).optional().describe("Drawing element guids (get_layout_drawings)"),
       layouts: z.array(LayoutRef).min(1).optional().describe("Update every drawing on these layouts"),

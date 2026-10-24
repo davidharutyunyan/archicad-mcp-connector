@@ -116,8 +116,8 @@ OS ZoneRelations (const API_Guid& guid, bool withPolygons)
 	std::map<std::string, GS::Array<GS::UniString>> grouped;
 	Int32 total = 0;
 	for (const auto& pair : info.elementsGroupedByType) {
-		const API_ElemType& type = *pair.key;
-		const GS::Array<API_Guid>& list = *pair.value;
+		const API_ElemType& type = HashKeyOf (pair);
+		const GS::Array<API_Guid>& list = HashValueOf (pair);
 		total += (Int32) list.GetSize ();
 		grouped[std::string (ToStr (ElemTypeName (type)).ToCStr ())].Append (GuidStrings (list));
 	}

@@ -131,7 +131,17 @@ GS::String ToStr (const GS::UniString& s)
 
 bool EqualsIgnoreCase (const GS::UniString& a, const GS::UniString& b)
 {
-	return a.IsEqual (b, GS::UniString::CaseInsensitive);
+	return a.IsEqual (b, CC_CASE_INSENSITIVE);
+}
+
+
+bool ContainsIgnoreCase (const GS::UniString& haystack, const GS::UniString& needle)
+{
+	if (needle.IsEmpty ())
+		return true;
+	if (haystack.IsEmpty ())
+		return false;
+	return haystack.ToLowerCase ().Contains (needle.ToLowerCase ());
 }
 
 // --- Readers -----------------------------------------------------------------

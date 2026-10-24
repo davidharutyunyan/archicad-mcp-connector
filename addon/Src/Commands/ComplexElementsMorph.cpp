@@ -89,7 +89,7 @@ API_OverriddenAttribute NoOverride ()
 {
 	API_OverriddenAttribute a;
 	BNZeroMemory (&a, sizeof (a));
-	a.overridden = false;
+	ClearOverridden (a);
 	return a;
 }
 
@@ -559,7 +559,9 @@ void ApplyMorphFields (API_MorphType& morph, API_Element* mask, const OS& spec)
 	if (ApplyAttrField (spec, "uncutLineType", API_LinetypeID, morph.uncutLineType))				MORPH_SET (uncutLineType);
 	if (ApplyPenField (spec, "overheadLinePen", morph.overheadLinePen))								MORPH_SET (overheadLinePen);
 	if (ApplyAttrField (spec, "overheadLineType", API_LinetypeID, morph.overheadLineType))			MORPH_SET (overheadLineType);
-	if (ApplyCutFillPenOverride (spec, morph.penOverride))											MORPH_SET (penOverride);
+	if (ApplyCutFillPens (spec, CutFillPensOf (morph))) {
+		CC_MASK_CUT_FILL_PENS (MORPH_SET);
+	}
 	if (ApplyFlag (spec, "showCoverFill", morph.useCoverFillType))									MORPH_SET (useCoverFillType);
 	if (ApplyAttrField (spec, "coverFill", API_FilltypeID, morph.coverFillType)) {
 		MORPH_SET (coverFillType);
@@ -668,10 +670,10 @@ void AddBodyJson (OS& out, const API_MorphType& morph, const API_ElementMemo& me
 	const UInt32 tableSize = PtrCount (memo.morphMaterialMapTable);
 	for (UInt32 i = 0; i < tableSize; ++i) {
 		const API_OverriddenAttribute& a = memo.morphMaterialMapTable[i];
-		if (!a.overridden || seen.Contains (a.attributeIndex))
+		if (!IsOverridden (a) || seen.Contains (OverriddenIndex (a)))
 			continue;
-		seen.Push (a.attributeIndex);
-		overrides.Push (AttrRef (API_MaterialID, a.attributeIndex));
+		seen.Push (OverriddenIndex (a));
+		overrides.Push (AttrRef (API_MaterialID, OverriddenIndex (a)));
 	}
 	out.Add ("faceSurfaceOverrides", overrides);
 }
@@ -702,7 +704,7 @@ void SerializeMorph (const API_Element& element, OS& out)
 	out.Add ("uncutLineType", AttrRef (API_LinetypeID, morph.uncutLineType));
 	out.Add ("overheadLinePen", (Int32) morph.overheadLinePen);
 	out.Add ("overheadLineType", AttrRef (API_LinetypeID, morph.overheadLineType));
-	AddCutFillPenOverrideJson (out, morph.penOverride);
+	AddCutFillPensJson (out, CutFillPensOf (morph));
 	out.Add ("showCoverFill", morph.useCoverFillType);
 	out.Add ("coverFill", AttrRef (API_FilltypeID, morph.coverFillType));
 	out.Add ("coverFillPen", (Int32) morph.coverFillPen);
@@ -879,8 +881,8 @@ OS MorphGeometryJson (const API_Guid& guid, UInt32 maxVertices)
 			face.Add ("holes", holes);
 		}
 		API_OverriddenAttribute surface;
-		if (ResolveFaceSurface (*body, p, *memo, surface) && surface.overridden)
-			face.Add ("surface", AttrRef (API_MaterialID, surface.attributeIndex));
+		if (ResolveFaceSurface (*body, p, *memo, surface) && IsOverridden (surface))
+			face.Add ("surface", AttrRef (API_MaterialID, OverriddenIndex (surface)));
 		if (body->GetConstPolygonAttributes (p).IsInvisible ())
 			face.Add ("hidden", true);
 		faces.Push (face);

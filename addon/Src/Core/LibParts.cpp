@@ -163,7 +163,7 @@ API_LibPart FindLibPart (const OS& os, const char* key, std::optional<API_LibTyp
 				if (close > 0)
 					mainGuid = mainGuid.GetSubstring (0, close);
 				auto scan = ScanLibParts ([&] (const API_LibPart& lp) {
-					return GS::UniString (lp.ownUnID).Contains (mainGuid, GS::UniString::CaseInsensitive);
+					return ContainsIgnoreCase (GS::UniString (lp.ownUnID), mainGuid);
 				}, 1);
 				if (!scan.IsEmpty ())
 					found = scan[0];
@@ -198,7 +198,7 @@ API_LibPart FindLibPart (const OS& os, const char* key, std::optional<API_LibTyp
 			return false;
 		if (!lp.isPlaceable)
 			return false;
-		return GS::UniString (lp.docu_UName).Contains (name, GS::UniString::CaseInsensitive);
+		return ContainsIgnoreCase (GS::UniString (lp.docu_UName), name);
 	}, 8);
 	if (partial.GetSize () == 1)
 		return partial[0];

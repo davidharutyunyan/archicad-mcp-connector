@@ -99,8 +99,17 @@ void AttrData::Reset ()
 		delete attr.material.texture.fileLoc;
 		attr.material.texture.fileLoc = nullptr;
 	}
+#if CC_AC_VERSION >= 27
+	if (mvo.modelViewOpt.gdlOptions != nullptr)
+		ACAPI_FreeGDLModelViewOptionsPtr (&mvo.modelViewOpt.gdlOptions);
+	pen = {};
+	font = {};
+	dimStand = {};
+	mvo = {};
+#else
 	if (typeID == API_ModelViewOptionsID && attr.modelViewOpt.modelViewOpt.gdlOptions != nullptr)
 		ACAPI_FreeGDLModelViewOptionsPtr (&attr.modelViewOpt.modelViewOpt.gdlOptions);
+#endif
 	BNZeroMemory (&attr, sizeof (attr));
 	attr.header.typeID = typeID;
 }
@@ -129,6 +138,10 @@ GSErrCode AttrData::Load (API_AttrTypeID typeID, API_AttributeIndex index)
 	bmManufacturer.Clear ();
 	bmDescription.Clear ();
 	PrepareForWrite ();
+#if CC_AC_VERSION >= 27
+	if (IsRelocatedAttrType (typeID))
+		return LoadRelocated ();
+#endif
 	const GSErrCode err = ACAPI_Attribute_Get (&attr);
 	if (err == NoError && typeID == API_BuildingMaterialID) {
 		// The string pointers are caller-provided buffers; copy defensively should Archicad ever
@@ -149,6 +162,40 @@ GSErrCode AttrData::Load (API_AttrTypeID typeID, API_AttributeIndex index)
 	PrepareForWrite ();
 	return err;
 }
+
+
+#if CC_AC_VERSION >= 27
+GSErrCode AttrData::LoadRelocated ()
+{
+	const API_AttrTypeID typeID = attr.header.typeID;
+	const Int32 i = AttrIndexToInt (attr.header.index);
+	GSErrCode err = APIERR_BADINDEX;
+	if (typeID == API_PenID) {
+		pen.index = (short) i;
+		if (i >= 1 && i <= 255)
+			err = ACAPI_Attribute_GetPen (pen);
+	} else if (typeID == API_FontID) {
+		font.head.index = i;
+		font.head.uniStringNamePtr = &name;
+		err = ACAPI_Font_GetFont (font);
+		font.head.uniStringNamePtr = nullptr;
+	} else if (typeID == API_DimStandID) {
+		dimStand.head.index = i;
+		dimStand.head.uniStringNamePtr = &name;
+		err = ACAPI_Navigator_DimStand_Get (dimStand);
+		dimStand.head.uniStringNamePtr = nullptr;
+		attr.header.guid = dimStand.head.guid;
+	} else if (typeID == API_ModelViewOptionsID) {
+		mvo.head.index = i;
+		mvo.head.uniStringNamePtr = &name;
+		err = ACAPI_Navigator_ModelViewOptions_Get (&mvo);
+		mvo.head.uniStringNamePtr = nullptr;
+		attr.header.guid = mvo.head.guid;
+	}
+	PrepareForWrite ();
+	return err;
+}
+#endif
 
 
 DefsExt::DefsExt ()
@@ -211,6 +258,12 @@ GS::UniString TypeName (API_AttrTypeID t)
 }
 
 
+#if CC_AC_VERSION >= 27
+GS::UniString IntStr (Int32 v);
+GS::UniString IntStr (const API_AttributeIndex& v) { return IntStr (AttrIndexToInt (v)); }
+#endif
+
+
 GS::UniString IntStr (Int32 v)
 {
 	return GS::ValueToUniString (v);
@@ -271,6 +324,62 @@ T** VectorToHandle (const std::vector<T>& v)
 	for (size_t i = 0; i < v.size (); ++i)
 		(*h)[i] = v[i];
 	return h;
+}
+
+
+// --- Layer states of layer combinations ------------------------------------------------------------
+// Archicad 26: defs.layer_statItems is a handle of API_LayerStat {lInd, lFlags, conClassId} (layerComb.lNumb entries).
+// Archicad 27+: a GS::HashTable<API_AttributeIndex, API_LayerStat {lFlags, conClassId}> keyed by the layer index.
+
+struct LayerStatEntry {
+	API_AttributeIndex	index;
+	short				flags;
+	Int32				group;
+};
+
+
+std::vector<LayerStatEntry> ReadLayerStats (const API_AttributeDefExt& defs, Int32 count)
+{
+	std::vector<LayerStatEntry> out;
+	if (defs.layer_statItems == nullptr)
+		return out;
+#if CC_AC_VERSION >= 27
+	(void) count;
+	for (auto pair : *defs.layer_statItems)
+		out.push_back ({ HashKeyOf (pair), HashValueOf (pair).lFlags, HashValueOf (pair).conClassId });
+	std::sort (out.begin (), out.end (), [] (const LayerStatEntry& a, const LayerStatEntry& b) { return a.index < b.index; });
+#else
+	for (const API_LayerStat& st : HandleToVector (defs.layer_statItems, count))
+		out.push_back ({ st.lInd, st.lFlags, st.conClassId });
+#endif
+	return out;
+}
+
+
+// Replaces the layer states in defs (the caller sets layerComb.lNumb on Archicad 26).
+void WriteLayerStats (API_AttributeDefExt& defs, const std::vector<LayerStatEntry>& list)
+{
+#if CC_AC_VERSION >= 27
+	if (defs.layer_statItems == nullptr)
+		defs.layer_statItems = new GS::HashTable<API_AttributeIndex, API_LayerStat> ();	// freed by ACAPI_DisposeAttrDefsHdlsExt
+	defs.layer_statItems->Clear ();
+	for (const LayerStatEntry& e : list) {
+		API_LayerStat st = {};
+		st.lFlags = e.flags;
+		st.conClassId = e.group;
+		defs.layer_statItems->Add (e.index, st);
+	}
+#else
+	std::vector<API_LayerStat> stats;
+	for (const LayerStatEntry& e : list) {
+		API_LayerStat st = {};
+		st.lInd = e.index;
+		st.lFlags = e.flags;
+		st.conClassId = e.group;
+		stats.push_back (st);
+	}
+	SetHandle (defs.layer_statItems, VectorToHandle (stats));
+#endif
 }
 
 
@@ -653,12 +762,10 @@ const NamedValue kLayerBases[] = {
 template <typename Fn>
 void ForEachAttr (API_AttrTypeID typeID, Fn&& fn)
 {
-	API_AttributeIndex count = 0;
-	if (ACAPI_Attribute_GetNum (typeID, &count) != NoError)
-		return;
+	const GS::Array<Int32> indices = AttrIndices (typeID);
 	AttrData a;
-	for (API_AttributeIndex i = 1; i <= count; ++i) {
-		if (a.Load (typeID, i) != NoError)
+	for (const Int32 i : indices) {
+		if (a.Load (typeID, AttrIndexFromInt (i)) != NoError)
 			continue;
 		if (!fn (a))
 			break;
@@ -767,12 +874,12 @@ std::optional<API_AttributeIndex> OptRef (API_AttrTypeID typeID, const OS& os, c
 		if (typeID == API_PenID) {
 			if (idx < 1 || idx > 255)
 				Fail ("Pen index must be 1..255 (got " + IntStr (idx) + ").", APIERR_BADINDEX);
-			return idx;
+			return AttrIndexFromInt (idx);
 		}
 		AttrData a;
-		if (idx < 1 || a.Load (typeID, idx) != NoError)
+		if (idx < 1 || a.Load (typeID, AttrIndexFromInt (idx)) != NoError)
 			Fail (tname + " with index " + IntStr (idx) + " does not exist (deleted or out of range)." + ListHint (typeID), APIERR_BADINDEX);
-		return idx;
+		return AttrIndexFromInt (idx);
 	}
 	if (os.IsString (key)) {
 		const GS::UniString name = GetString (os, key);
@@ -816,7 +923,7 @@ API_AttributeIndex ResolveRef (API_AttrTypeID typeID, const OS& os, const char* 
 
 OS Ref (API_AttrTypeID typeID, API_AttributeIndex index)
 {
-	OS ref ("index", (Int32) index);
+	OS ref ("index", AttrIndexToInt (index));
 	if (typeID == API_PenID)
 		return ref;
 	AttrData a;
@@ -833,7 +940,7 @@ static GS::UniString DisplayName (API_AttrTypeID typeID, API_AttributeIndex inde
 	AttrData a;
 	if (a.Load (typeID, index) == NoError)
 		return a.name;
-	return "#" + GS::ValueToUniString ((Int32) index);
+	return "#" + GS::ValueToUniString (AttrIndexToInt (index));
 }
 
 
@@ -860,10 +967,10 @@ std::optional<API_AttributeIndex> OptRefOrNone (API_AttrTypeID typeID, const OS&
 	if (s.IsBool (key)) {
 		if (GetBool (s, key))
 			Fail ("'" + GS::UniString (key) + "' must be a " + TypeName (typeID) + " reference, or false for none.");
-		return 0;
+		return AttrIndexFromInt (0);
 	}
 	if (IsNumber (s, key) && GetInt (s, key) == 0)
-		return 0;
+		return AttrIndexFromInt (0);
 	return OptRef (typeID, s, key);
 }
 
@@ -929,7 +1036,8 @@ void CollectFolders (const API_AttributeFolder& folder, Int32 depth, FolderMap& 
 // Attribute folders exist in AC26 only for these types (tested live on build 5002: creating a folder for
 // Line/Fill types fails with APIERR_BADPARS, and reading the folders of other types, e.g. dimension
 // standards, trips an assertion inside Archicad (AttributeFolder::GetRootInAttributeContainer)), so
-// never touch the folders of other types.
+// never touch the folders of other types. Archicad 27 added folders to the other attribute types (the list
+// of the official JSON API's attribute folder commands).
 bool SupportsFolders (API_AttrTypeID t)
 {
 	switch (t) {
@@ -939,9 +1047,30 @@ bool SupportsFolders (API_AttrTypeID t)
 		case API_MaterialID:
 		case API_BuildingMaterialID:
 			return true;
+#if CC_AC_VERSION >= 27
+		case API_LayerCombID:
+		case API_LinetypeID:
+		case API_FilltypeID:
+		case API_PenTableID:
+		case API_ZoneCatID:
+		case API_MEPSystemID:
+		case API_OperationProfileID:
+			return true;
+#endif
 		default:
 			return false;
 	}
+}
+
+
+GS::UniString NoFoldersMessage (API_AttrTypeID t)
+{
+#if CC_AC_VERSION >= 27
+	return TypeName (t) + " attributes cannot be organized in folders; omit 'folder'.";
+#else
+	return TypeName (t) + " attributes cannot be organized in folders (Archicad 26 has folders only for Layer, Composite, "
+		   "Profile, Surface and BuildingMaterial); omit 'folder'.";
+#endif
 }
 
 
@@ -963,8 +1092,7 @@ void CheckFolderField (API_AttrTypeID t, const OS& spec)
 	if (!Has (spec, "folder"))
 		return;
 	if (!SupportsFolders (t))
-		Fail (TypeName (t) + " attributes cannot be organized in folders (Archicad 26 has folders only for Layer, Composite, "
-			  "Profile, Surface and BuildingMaterial); omit 'folder'.");
+		Fail (NoFoldersMessage (t));
 	for (const GS::UniString& part : GetPathField (spec, "folder")) {
 		if (part.IsEmpty ())
 			Fail ("'folder' contains an empty folder name.");
@@ -975,8 +1103,7 @@ void CheckFolderField (API_AttrTypeID t, const OS& spec)
 void MoveToFolder (API_AttrTypeID t, API_AttributeIndex index, const GS::Array<GS::UniString>& path)
 {
 	if (!SupportsFolders (t))
-		Fail (TypeName (t) + " attributes cannot be organized in folders (Archicad 26 has folders only for Layer, Composite, "
-			  "Profile, Surface and BuildingMaterial); omit 'folder'.");
+		Fail (NoFoldersMessage (t));
 	AttrData a;
 	Check (a.Load (t, index), "Cannot read " + TypeName (t) + " " + IntStr (index));
 	// Create the folder chain level by level (parents first).
@@ -1010,7 +1137,7 @@ struct SerializeCtx {
 
 	OS RefOf (API_AttrTypeID t, API_AttributeIndex i)
 	{
-		const auto key = std::make_pair ((Int32) t, (Int32) i);
+		const auto key = std::make_pair ((Int32) t, AttrIndexToInt (i));
 		auto it = refs.find (key);
 		if (it != refs.end ())
 			return it->second;
@@ -1035,9 +1162,29 @@ void SerializeLayer (const API_Attribute& a, OS& out)
 }
 
 
-OS PenJson (const API_PenType& pen)
+// Pens: Archicad 26 API_PenType (pen attributes, pen table items with a header); 27+ API_Pen (index field).
+#if CC_AC_VERSION >= 27
+using PenRecord = API_Pen;
+short			PenIndexOf (const API_Pen& pen)				{ return pen.index; }
+PenRecord&		PenOf (AttrData& a)							{ return a.pen; }
+Int32			PenTableCount (const API_AttributeDefExt& defs)	{ return defs.penTable_Items != nullptr ? (Int32) defs.penTable_Items->GetSize () : 0; }
+PenRecord&		PenTableItem (API_AttributeDefExt& defs, Int32 i)	{ return (*defs.penTable_Items)[(UIndex) i]; }
+GSErrCode		ModifyPenAttr (AttrData& a)					{ return ACAPI_Attribute_ModifyPen (a.pen); }
+const API_DimensionPrefs& DimPrefsOf (const AttrData& a)	{ return a.dimStand.dim; }
+#else
+using PenRecord = API_PenType;
+short			PenIndexOf (const API_PenType& pen)			{ return (short) pen.head.index; }
+PenRecord&		PenOf (AttrData& a)							{ return a.attr.pen; }
+Int32			PenTableCount (const API_AttributeDefExt& defs)	{ return HandleCount (defs.penTable_Items); }
+PenRecord&		PenTableItem (API_AttributeDefExt& defs, Int32 i)	{ return (*defs.penTable_Items)[i]; }
+GSErrCode		ModifyPenAttr (AttrData& a)					{ return ACAPI_Attribute_Modify (&a.attr, nullptr); }
+const API_DimensionPrefs& DimPrefsOf (const AttrData& a)	{ return a.attr.dimension.dim; }
+#endif
+
+
+OS PenJson (const PenRecord& pen)
 {
-	OS o ("index", (Int32) pen.head.index);
+	OS o ("index", (Int32) PenIndexOf (pen));
 	o.Add ("color", ColorHex (pen.rgb));
 	o.Add ("width", pen.width);
 	GS::UniString desc = FromCBuf (pen.description, sizeof (pen.description));
@@ -1245,17 +1392,15 @@ void SerializeLayerComb (const API_Attribute& a, const DefsExt* d, SerializeCtx&
 		return;
 	GS::Array<OS> layers;
 	Int32 visible = 0, locked = 0;
-	const Int32 n = std::min ((Int32) a.layerComb.lNumb, HandleCount (d->defs.layer_statItems));
-	for (Int32 i = 0; i < n; ++i) {
-		const API_LayerStat& st = (*d->defs.layer_statItems)[i];
-		OS l ("layer", ctx.RefOf (API_LayerID, st.lInd));
-		const bool hidden = (st.lFlags & APILay_Hidden) != 0;
+	for (const LayerStatEntry& st : ReadLayerStats (d->defs, (Int32) a.layerComb.lNumb)) {
+		OS l ("layer", ctx.RefOf (API_LayerID, st.index));
+		const bool hidden = (st.flags & APILay_Hidden) != 0;
 		l.Add ("hidden", hidden);
-		l.Add ("locked", (st.lFlags & APILay_Locked) != 0);
-		l.Add ("wireframe", (st.lFlags & APILay_ForceToWire) != 0);
-		l.Add ("intersectionGroup", (Int32) st.conClassId);
+		l.Add ("locked", (st.flags & APILay_Locked) != 0);
+		l.Add ("wireframe", (st.flags & APILay_ForceToWire) != 0);
+		l.Add ("intersectionGroup", (Int32) st.group);
 		if (!hidden) ++visible;
-		if (st.lFlags & APILay_Locked) ++locked;
+		if (st.flags & APILay_Locked) ++locked;
 		layers.Push (l);
 	}
 	out.Add ("visibleLayerCount", visible);
@@ -1300,9 +1445,10 @@ void SerializePenTable (const API_Attribute& a, const DefsExt* d, OS& out)
 	if (d == nullptr || d->defs.penTable_Items == nullptr)
 		return;
 	GS::Array<OS> pens;
-	const Int32 n = HandleCount (d->defs.penTable_Items);
+	API_AttributeDefExt& defs = const_cast<API_AttributeDefExt&> (d->defs);
+	const Int32 n = PenTableCount (defs);
 	for (Int32 i = 0; i < n; ++i)
-		pens.Push (PenJson ((*d->defs.penTable_Items)[i]));
+		pens.Push (PenJson (PenTableItem (defs, i)));
 	out.Add ("pens", pens);
 }
 
@@ -1329,9 +1475,8 @@ OS LengthFormatJson (const API_LengthDimFormat& f)
 }
 
 
-void SerializeDimStandard (const API_Attribute& a, OS& out)
+void SerializeDimStandard (const API_DimensionPrefs& p, OS& out)
 {
-	const API_DimensionPrefs& p = a.dimension.dim;
 	out.Add ("linear", LengthFormatJson (p.linear));
 	out.Add ("angle", OS ("unit", UnitName (kAngleUnits, (Int32) p.angle.unit), "decimals", (Int32) p.angle.angleDecimals,
 						  "hideZeroDecimals", p.angle.hide0Dec));
@@ -1348,9 +1493,16 @@ void SerializeDimStandard (const API_Attribute& a, OS& out)
 void SerializeMEP (const API_Attribute& a, SerializeCtx& ctx, OS& out)
 {
 	const API_MEPSystemType& m = a.mepSystem;
+#if CC_AC_VERSION >= 29
+	// Archicad 29: one domain value (ventilation = ductwork, piping = pipework, cable carrier = cabling).
+	out.Add ("ductwork", (m.domain & APIMEPDomain_Ventilation) != 0);
+	out.Add ("pipework", (m.domain & APIMEPDomain_Piping) != 0);
+	out.Add ("cabling", (m.domain & APIMEPDomain_CableCarrier) != 0);
+#else
 	out.Add ("ductwork", m.isForDuctwork);
 	out.Add ("pipework", m.isForPipework);
 	out.Add ("cabling", m.isForCabling);
+#endif
 	out.Add ("contourPen", (Int32) m.contourPen);
 	out.Add ("fillPen", (Int32) m.fillPen);
 	out.Add ("fillBackgroundPen", (Int32) m.fillBgPen);
@@ -1437,7 +1589,7 @@ void SerializeBuildingMaterial (const AttrData& a, SerializeCtx& ctx, OS& out)
 OS SerializeAttr (AttrData& a, SerializeCtx& ctx)
 {
 	const API_AttrTypeID t = a.Type ();
-	OS out ("index", (Int32) a.Index ());
+	OS out ("index", AttrIndexToInt (a.Index ()));
 	if (t != API_PenID || !a.name.IsEmpty ())
 		out.Add ("name", a.name);
 	if (a.attr.header.guid != APINULLGuid)		// pens have no GUID
@@ -1461,9 +1613,10 @@ OS SerializeAttr (AttrData& a, SerializeCtx& ctx)
 
 	switch (t) {
 		case API_PenID: {
-			out.Add ("color", ColorHex (a.attr.pen.rgb));
-			out.Add ("width", a.attr.pen.width);
-			GS::UniString desc = FromCBuf (a.attr.pen.description, sizeof (a.attr.pen.description));
+			const PenRecord& pen = PenOf (a);
+			out.Add ("color", ColorHex (pen.rgb));
+			out.Add ("width", pen.width);
+			GS::UniString desc = FromCBuf (pen.description, sizeof (pen.description));
 			if (!desc.IsEmpty ())
 				out.Add ("description", desc);
 			break;
@@ -1477,7 +1630,7 @@ OS SerializeAttr (AttrData& a, SerializeCtx& ctx)
 		case API_ZoneCatID:				SerializeZoneCat (a.attr, dp, out);				break;
 		case API_ProfileID:				SerializeProfile (a.attr, dp, out);				break;
 		case API_PenTableID:			SerializePenTable (a.attr, dp, out);			break;
-		case API_DimStandID:			if (ctx.detailed) SerializeDimStandard (a.attr, out);	break;
+		case API_DimStandID:			if (ctx.detailed) SerializeDimStandard (DimPrefsOf (a), out);	break;
 		case API_MEPSystemID:			SerializeMEP (a.attr, ctx, out);				break;
 		case API_OperationProfileID:	SerializeOpProfile (a.attr, dp, out);			break;
 		case API_BuildingMaterialID:	SerializeBuildingMaterial (a, ctx, out);		break;
@@ -1602,7 +1755,7 @@ void ApplyLayer (API_Attribute& a, const OS& s, const ApplyCtx& ctx)
 }
 
 
-void ApplyPen (API_PenType& pen, const OS& s)
+void ApplyPen (PenRecord& pen, const OS& s)
 {
 	ApplyColor (pen.rgb, s, "color");
 	if (auto w = OptRange (s, "width", 0.0, 100.0))
@@ -1892,7 +2045,7 @@ void ApplyComposite (API_Attribute& a, DefsExt& d, const OS& s, const ApplyCtx& 
 		// Face lines: [outer contour, separators..., inner contour] = skinCount + 1 entries.
 		const Int32 n = (Int32) newSkins.size ();
 		API_CWallLineComponent def = {};
-		def.ltypeInd = 1;
+		def.ltypeInd = AttrIndexFromInt (1);
 		def.linePen = 1;
 		std::vector<API_CWallLineComponent> newLines ((size_t) n + 1, def);
 		if (!lines.empty ()) {
@@ -2031,29 +2184,27 @@ void ApplyLayerComb (API_Attribute& a, DefsExt& d, const OS& s, const ApplyCtx& 
 		return;
 
 	// Current state of every layer (flags + intersection group).
-	std::map<API_AttributeIndex, API_LayerStat> current;
+	std::map<API_AttributeIndex, LayerStatEntry> current;
 	ForEachAttr (API_LayerID, [&] (AttrData& l) {
-		API_LayerStat st = {};
-		st.lInd = l.Index ();
-		st.lFlags = (short) (l.attr.header.flags & (APILay_Hidden | APILay_Locked | APILay_ForceToWire));
-		st.conClassId = l.attr.layer.conClassId;
-		current[st.lInd] = st;
+		LayerStatEntry st = { l.Index (), (short) (l.attr.header.flags & (APILay_Hidden | APILay_Locked | APILay_ForceToWire)),
+							  l.attr.layer.conClassId };
+		current[st.index] = st;
 		return true;
 	});
 
-	std::map<API_AttributeIndex, API_LayerStat> stats;
+	std::map<API_AttributeIndex, LayerStatEntry> stats;
 	if (base == LayerBase::Unchanged) {
-		for (const API_LayerStat& st : HandleToVector (d.defs.layer_statItems, a.layerComb.lNumb)) {
-			if (current.count (st.lInd) > 0)		// drop deleted layers
-				stats[st.lInd] = st;
+		for (const LayerStatEntry& st : ReadLayerStats (d.defs, (Int32) a.layerComb.lNumb)) {
+			if (current.count (st.index) > 0)		// drop deleted layers
+				stats[st.index] = st;
 		}
 	} else {
 		for (const auto& [idx, cur] : current) {
-			API_LayerStat st = cur;
+			LayerStatEntry st = cur;
 			if (base == LayerBase::AllVisible)
-				st.lFlags = 0;
+				st.flags = 0;
 			else if (base == LayerBase::AllHidden)
-				st.lFlags = idx == 1 ? (short) 0 : (short) APILay_Hidden;
+				st.flags = idx == 1 ? (short) 0 : (short) APILay_Hidden;
 			stats[idx] = st;
 		}
 	}
@@ -2080,35 +2231,35 @@ void ApplyLayerComb (API_Attribute& a, DefsExt& d, const OS& s, const ApplyCtx& 
 		for (API_AttributeIndex idx : targets) {
 			auto it = stats.find (idx);
 			if (it == stats.end ()) {		// not yet in the combination: layers missing from a combination are hidden
-				API_LayerStat st = current.count (idx) > 0 ? current[idx] : API_LayerStat {};
-				st.lInd = idx;
-				st.lFlags = APILay_Hidden;
+				LayerStatEntry st = current.count (idx) > 0 ? current[idx] : LayerStatEntry { idx, 0, 1 };
+				st.index = idx;
+				st.flags = APILay_Hidden;
 				it = stats.emplace (idx, st).first;
 			}
-			API_LayerStat& st = it->second;
+			LayerStatEntry& st = it->second;
 			if (hidden.has_value ()) {
 				if (idx == 1 && *hidden)
 					Fail ("The Archicad layer (index 1) cannot be hidden.");
-				SetBits (st.lFlags, APILay_Hidden, *hidden);
+				SetBits (st.flags, APILay_Hidden, *hidden);
 			}
 			if (auto v = OptBool (ls, "locked")) {
 				if (idx == 1 && *v)
 					Fail ("The Archicad layer (index 1) cannot be locked.");
-				SetBits (st.lFlags, APILay_Locked, *v);
+				SetBits (st.flags, APILay_Locked, *v);
 			}
-			ApplyBit (st.lFlags, ls, "wireframe", APILay_ForceToWire);
+			ApplyBit (st.flags, ls, "wireframe", APILay_ForceToWire);
 			if (auto g = OptInt (ls, "intersectionGroup")) {
 				if (*g < 0)
 					Fail ("'intersectionGroup' must be >= 0.");
-				st.conClassId = *g;
+				st.group = *g;
 			}
 		}
 	}
 
-	std::vector<API_LayerStat> list;
+	std::vector<LayerStatEntry> list;
 	for (const auto& [idx, st] : stats)
 		list.push_back (st);
-	SetHandle (d.defs.layer_statItems, VectorToHandle (list));
+	WriteLayerStats (d.defs, list);
 	a.layerComb.lNumb = (Int32) list.size ();
 }
 
@@ -2180,16 +2331,16 @@ void ApplyProfile (API_Attribute& a, DefsExt& d, const OS& s, const ApplyCtx& ct
 void ApplyPenTable (DefsExt& d, const OS& s)
 {
 	GS::Array<OS> pens = GetObjectArray (s, "pens", false);
-	const Int32 n = HandleCount (d.defs.penTable_Items);
+	const Int32 n = PenTableCount (d.defs);
 	for (const OS& ps : pens) {
 		const Int32 idx = GetInt (ps, "index");
-		API_PenType* pen = nullptr;
+		PenRecord* pen = nullptr;
 		for (Int32 i = 0; i < n && pen == nullptr; ++i) {
-			if ((*d.defs.penTable_Items)[i].head.index == idx)
-				pen = &(*d.defs.penTable_Items)[i];
+			if (PenIndexOf (PenTableItem (d.defs, i)) == idx)
+				pen = &PenTableItem (d.defs, i);
 		}
 		if (pen == nullptr && idx >= 1 && idx <= n)
-			pen = &(*d.defs.penTable_Items)[idx - 1];
+			pen = &PenTableItem (d.defs, idx - 1);
 		if (pen == nullptr)
 			Fail ("Pen index " + IntStr (idx) + " is not in this pen table (1.." + IntStr (n) + ").");
 		ApplyPen (*pen, ps);
@@ -2200,9 +2351,17 @@ void ApplyPenTable (DefsExt& d, const OS& s)
 void ApplyMEP (API_Attribute& a, const OS& s)
 {
 	API_MEPSystemType& m = a.mepSystem;
+#if CC_AC_VERSION >= 29
+	Int32 domain = (Int32) m.domain;
+	if (auto v = OptBool (s, "ductwork")) SetBits (domain, APIMEPDomain_Ventilation, *v);
+	if (auto v = OptBool (s, "pipework")) SetBits (domain, APIMEPDomain_Piping, *v);
+	if (auto v = OptBool (s, "cabling")) SetBits (domain, APIMEPDomain_CableCarrier, *v);
+	m.domain = (API_MEPDomainID) domain;
+#else
 	if (auto v = OptBool (s, "ductwork")) m.isForDuctwork = *v;
 	if (auto v = OptBool (s, "pipework")) m.isForPipework = *v;
 	if (auto v = OptBool (s, "cabling")) m.isForCabling = *v;
+#endif
 	if (auto v = OptPen (s, "contourPen")) m.contourPen = *v;
 	if (auto v = OptPen (s, "fillPen")) m.fillPen = *v;
 	if (auto v = OptPen (s, "fillBackgroundPen", true)) m.fillBgPen = *v;
@@ -2252,7 +2411,7 @@ void ApplyBuildingMaterial (AttrData& ad, const OS& s)
 void ApplyFields (AttrData& a, DefsExt& d, const OS& s, const ApplyCtx& ctx)
 {
 	switch (a.Type ()) {
-		case API_PenID:					ApplyPen (a.attr.pen, s);				break;
+		case API_PenID:					ApplyPen (PenOf (a), s);				break;
 		case API_LayerID:				ApplyLayer (a.attr, s, ctx);			break;
 		case API_LinetypeID:			ApplyLine (a.attr, d, s, ctx);			break;
 		case API_FilltypeID:			ApplyFill (a.attr, d, s, ctx);			break;
@@ -2322,7 +2481,7 @@ OS ModifyIndex (API_AttrTypeID t, API_AttributeIndex idx, const OS& spec, bool f
 	ApplyFields (a, d, spec, ctx);
 	a.PrepareForWrite ();
 
-	GSErrCode err = (t == API_PenID) ? ACAPI_Attribute_Modify (&a.attr, nullptr) : ACAPI_Attribute_ModifyExt (&a.attr, &d.defs);
+	GSErrCode err = (t == API_PenID) ? ModifyPenAttr (a) : ACAPI_Attribute_ModifyExt (&a.attr, &d.defs);
 	if (err != NoError) {
 		GS::UniString hint = WriteHint (err);
 		if (t == API_LayerID && idx == 1)
@@ -2477,7 +2636,7 @@ OS CreateOne (API_AttrTypeID t, const OS& spec, IfExists defaultMode)
 	}
 
 	// New identity.
-	a.attr.header.index = 0;
+	a.attr.header.index = AttrIndexFromInt (0);
 	a.attr.header.guid = APINULLGuid;
 	a.attr.header.modiTime = 0;
 	a.attr.header.flags = (short) (a.attr.header.flags & ~(APIAttr_IsFromGDL | APIAttr_IsClientCreated));
@@ -2535,7 +2694,7 @@ std::map<API_AttributeIndex, Int32> CountElementsPerLayer ()
 
 std::optional<API_AttributeIndex> ActiveLayerCombination ()
 {
-	API_AttributeIndex idx = 0;
+	API_AttributeIndex idx = AttrIndexFromInt (0);
 	if (ACAPI_Environment (APIEnv_GetCurrLayerCombID, &idx) == NoError && idx > 0) {
 		AttrData a;
 		if (a.Load (API_LayerCombID, idx) == NoError)
@@ -2626,7 +2785,7 @@ OS GetAttributesCmd (const OS& p)
 	if (t == API_LayerID || t == API_LayerCombID)
 		AddActiveLayerCombination (out);
 	if (t == API_PenID) {
-		API_AttributeIndex penSet = 0;
+		API_AttributeIndex penSet = AttrIndexFromInt (0);
 		if (ACAPI_Environment (APIEnv_GetCurrPenSetID, &penSet) == NoError && penSet > 0)
 			out.Add ("activePenTable", Ref (API_PenTableID, penSet));
 	}
@@ -2742,7 +2901,7 @@ OS ModifyPensCmd (const OS& p)
 			Check (a.Load (API_PenTableID, *penTable), "Cannot read the pen table");
 			DefsExt d;
 			Check (d.Load (API_PenTableID, *penTable), "Cannot read the pens of the pen table");
-			const Int32 n = HandleCount (d.defs.penTable_Items);
+			const Int32 n = PenTableCount (d.defs);
 			bool any = false;
 			for (const OS& ps : pens) {
 				results.Push (Try ([&] {
@@ -2750,10 +2909,10 @@ OS ModifyPensCmd (const OS& p)
 					ApplyPenTable (d, one);
 					const Int32 idx = GetInt (ps, "index");
 					for (Int32 i = 0; i < n; ++i) {
-						if ((*d.defs.penTable_Items)[i].head.index == idx)
-							return PenJson ((*d.defs.penTable_Items)[i]);
+						if (PenIndexOf (PenTableItem (d.defs, i)) == idx)
+							return PenJson (PenTableItem (d.defs, i));
 					}
-					return PenJson ((*d.defs.penTable_Items)[idx - 1]);
+					return PenJson (PenTableItem (d.defs, idx - 1));
 				}));
 				any = any || !results.GetLast ().Contains ("error");
 			}
@@ -2771,19 +2930,19 @@ OS ModifyPensCmd (const OS& p)
 					if (idx < 1 || idx > 255)
 						Fail ("Pen index must be 1..255 (got " + IntStr (idx) + ").", APIERR_BADINDEX);
 					AttrData a;
-					Check (a.Load (API_PenID, idx), "Cannot read pen " + IntStr (idx));
-					ApplyPen (a.attr.pen, ps);
+					Check (a.Load (API_PenID, AttrIndexFromInt (idx)), "Cannot read pen " + IntStr (idx));
+					ApplyPen (PenOf (a), ps);
 					a.PrepareForWrite ();
-					const GSErrCode err = ACAPI_Attribute_Modify (&a.attr, nullptr);
+					const GSErrCode err = ModifyPenAttr (a);
 					if (err != NoError)
 						Fail ("Cannot modify pen " + IntStr (idx) + ": " + ErrorName (err) + "." + WriteHint (err), err);
 					AttrData after;
-					if (after.Load (API_PenID, idx) == NoError)
-						return PenJson (after.attr.pen);
-					return PenJson (a.attr.pen);
+					if (after.Load (API_PenID, AttrIndexFromInt (idx)) == NoError)
+						return PenJson (PenOf (after));
+					return PenJson (PenOf (a));
 				}));
 			}
-			API_AttributeIndex penSet = 0;
+			API_AttributeIndex penSet = AttrIndexFromInt (0);
 			if (ACAPI_Environment (APIEnv_GetCurrPenSetID, &penSet) == NoError && penSet > 0)
 				out.Add ("activePenTable", Ref (API_PenTableID, penSet));
 		}
@@ -2865,7 +3024,7 @@ OS SetLayerStatesCmd (const OS& p)
 					if (idx == 1 && ((hidden.has_value () && *hidden) || (locked.has_value () && *locked))) {
 						if (!byPattern)
 							Fail ("The Archicad layer (index 1) cannot be hidden or locked.");
-						skipped.Push (OS ("index", (Int32) idx, "name", a.name, "reason", GS::UniString ("the Archicad layer cannot be hidden or locked")));
+						skipped.Push (OS ("index", AttrIndexToInt (idx), "name", a.name, "reason", GS::UniString ("the Archicad layer cannot be hidden or locked")));
 						continue;
 					}
 					const short flagsBefore = a.attr.header.flags;
@@ -2883,10 +3042,10 @@ OS SetLayerStatesCmd (const OS& p)
 					if (err != NoError) {
 						if (!byPattern)
 							Fail ("Cannot change layer " + Quote (a.name) + ": " + ErrorName (err) + "." + WriteHint (err), err);
-						skipped.Push (OS ("index", (Int32) idx, "name", a.name, "reason", ErrorName (err)));
+						skipped.Push (OS ("index", AttrIndexToInt (idx), "name", a.name, "reason", ErrorName (err)));
 						continue;
 					}
-					changed.Push (OS ("index", (Int32) idx, "name", a.name));
+					changed.Push (OS ("index", AttrIndexToInt (idx), "name", a.name));
 				}
 				OS r ("changed", changed);
 				r.Add ("changedCount", (Int32) changed.GetSize ());

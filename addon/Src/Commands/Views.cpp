@@ -81,6 +81,16 @@ struct AttrNames {
 
 bool LoadAttrNames (API_AttrTypeID type, API_AttributeIndex index, AttrNames& out)
 {
+	if (IsRelocatedAttrType (type)) {		// Archicad 27+: model view options, dimension standards, fonts, pens
+		GS::UniString uni;
+		API_Guid guid = APINULLGuid;
+		if (!GetAttrHeader (type, index, &uni, &guid))
+			return false;
+		out.uni = uni;
+		CopyCStrN (out.raw, API_AttrNameLen, uni.ToCStr (0, MaxUSize, CC_UTF8).Get ());
+		out.guid = guid;
+		return true;
+	}
 	API_Attribute attr;
 	BNZeroMemory (&attr, sizeof (attr));
 	attr.header.typeID = type;
@@ -89,9 +99,12 @@ bool LoadAttrNames (API_AttrTypeID type, API_AttributeIndex index, AttrNames& ou
 	attr.header.uniStringNamePtr = &uni;
 	if (ACAPI_Attribute_Get (&attr) != NoError)
 		return false;
+#if CC_AC_VERSION < 27
 	if (type == API_ModelViewOptionsID)
 		ACAPI_FreeGDLModelViewOptionsPtr (&attr.modelViewOpt.modelViewOpt.gdlOptions);
-	else if (type == API_MaterialID && attr.material.texture.fileLoc != nullptr)
+	else
+#endif
+	if (type == API_MaterialID && attr.material.texture.fileLoc != nullptr)
 		delete attr.material.texture.fileLoc;
 	out.uni = uni.IsEmpty () ? DecodeCStrN (attr.header.name, API_AttrNameLen) : uni;
 	CopyCStrN (out.raw, API_AttrNameLen, attr.header.name);
@@ -104,15 +117,13 @@ bool LoadAttrNames (API_AttrTypeID type, API_AttributeIndex index, AttrNames& ou
 OS AttrRefFromRawName (API_AttrTypeID type, const char* raw, USize rawCapacity)
 {
 	const GS::UniString decoded = DecodeCStrN (raw, rawCapacity);
-	API_AttributeIndex count = 0;
-	if (ACAPI_Attribute_GetNum (type, &count) == NoError) {
-		for (API_AttributeIndex i = 1; i <= count; ++i) {
-			AttrNames names;
-			if (!LoadAttrNames (type, i, names))
-				continue;
-			if (std::strncmp (names.raw, raw, rawCapacity) == 0 || EqualsIgnoreCase (names.uni, decoded))
-				return OS ("index", (Int32) i, "name", names.uni, "guid", GuidStr (names.guid));
-		}
+	const GS::Array<Int32> indices = AttrIndices (type);
+	for (const Int32 i : indices) {
+		AttrNames names;
+		if (!LoadAttrNames (type, AttrIndexFromInt (i), names))
+			continue;
+		if (std::strncmp (names.raw, raw, rawCapacity) == 0 || EqualsIgnoreCase (names.uni, decoded))
+			return OS ("index", i, "name", names.uni, "guid", GuidStr (names.guid));
 	}
 	return OS ("name", decoded, "found", false);
 }
@@ -594,15 +605,15 @@ class DisplayStateKeeper {
 public:
 	DisplayStateKeeper ()
 	{
-		API_AttributeIndex count = 0;
-		if (ACAPI_Attribute_GetNum (API_LayerID, &count) == NoError) {
-			for (API_AttributeIndex i = 1; i <= count; ++i) {
+		const GS::Array<Int32> indices = AttrIndices (API_LayerID);
+		{
+			for (const Int32 i : indices) {
 				API_Attribute a;
 				BNZeroMemory (&a, sizeof (a));
 				a.header.typeID = API_LayerID;
-				a.header.index = i;
+				a.header.index = AttrIndexFromInt (i);
 				if (ACAPI_Attribute_Get (&a) == NoError)
-					layers.Push ({ i, (short) (a.header.flags & kLayerBits), a.layer.conClassId });
+					layers.Push ({ AttrIndexFromInt (i), (short) (a.header.flags & kLayerBits), a.layer.conClassId });
 			}
 		}
 		ACAPI_Environment (APIEnv_GetCurrLayerCombID, &layerComb, nullptr);
@@ -657,8 +668,13 @@ public:
 				note ("drawing scale", ACAPI_Database (APIDb_ChangeDrawingScaleID, &s, nullptr));
 			}
 			if (hasStructure) {
-				API_UIStructureDisplay sd = structure;
-				note ("structure display", ACAPI_Environment (APIEnv_ChangeStructureDisplayID, &sd, nullptr));
+				// Only when it differs: Archicad 29 refuses the call (APIERR_GENERAL) e.g. while a layout is in front.
+				API_UIStructureDisplay now;
+				BNZeroMemory (&now, sizeof (now));
+				if (ACAPI_Environment (APIEnv_GetStructureDisplayID, &now, nullptr) != NoError || std::memcmp (&now, &structure, sizeof (now)) != 0) {
+					API_UIStructureDisplay sd = structure;
+					note ("structure display", ACAPI_Environment (APIEnv_ChangeStructureDisplayID, &sd, nullptr));
+				}
 			}
 			if (hasRenovation) {
 				API_Guid g = renovation;
@@ -669,7 +685,7 @@ public:
 				note ("model view options", ACAPI_Environment (APIEnv_ChangeViewOptionsID, &vo, nullptr));
 			}
 		});
-		API_AttributeIndex penNow = 0;
+		API_AttributeIndex penNow = AttrIndexFromInt (0);
 		if (penSet > 0 && ACAPI_Environment (APIEnv_GetCurrPenSetID, &penNow, nullptr) == NoError && penNow != penSet)
 			problems.Push ("pen set (the Archicad 26 API cannot switch it back; the view's pen set is now active)");
 		return problems;
@@ -679,8 +695,8 @@ private:
 	static constexpr short kLayerBits = APILay_Hidden | APILay_Locked | APILay_ForceToWire;
 	struct LayerState { API_AttributeIndex index; short flags; Int32 group; };
 	GS::Array<LayerState>	layers;
-	API_AttributeIndex		layerComb = 0;
-	API_AttributeIndex		penSet = 0;
+	API_AttributeIndex		layerComb = AttrIndexFromInt (0);
+	API_AttributeIndex		penSet = AttrIndexFromInt (0);
 	double					scale = 0.0;
 	bool					hasScale = false;
 	API_UIStructureDisplay	structure;
@@ -917,13 +933,13 @@ OS CurrentViewSettingsJson ()
 			out.Add ("drawingScale", scale);
 	}
 
-	API_AttributeIndex layerComb = 0;
+	API_AttributeIndex layerComb = AttrIndexFromInt (0);
 	if (ACAPI_Environment (APIEnv_GetCurrLayerCombID, &layerComb, nullptr) == NoError && layerComb > 0)
 		out.Add ("layerCombination", AttrRef (API_LayerCombID, layerComb));
 	else
 		out.Add ("layerCombination", OS ("custom", true, "note", GS::UniString ("The layer settings do not match a saved layer combination.")));
 
-	API_AttributeIndex penSet = 0;
+	API_AttributeIndex penSet = AttrIndexFromInt (0);
 	if (ACAPI_Environment (APIEnv_GetCurrPenSetID, &penSet, nullptr) == NoError && penSet > 0)
 		out.Add ("penSet", AttrRef (API_PenTableID, penSet));
 
@@ -941,21 +957,16 @@ OS CurrentViewSettingsJson ()
 	BNZeroMemory (&vo, sizeof (vo));
 	if (ACAPI_Environment (APIEnv_GetViewOptionsID, &vo, nullptr) == NoError) {
 		GS::Array<OS> matching;
-		API_AttributeIndex count = 0;
-		if (ACAPI_Attribute_GetNum (API_ModelViewOptionsID, &count) == NoError) {
-			for (API_AttributeIndex i = 1; i <= count; ++i) {
-				API_Attribute attr;
-				BNZeroMemory (&attr, sizeof (attr));
-				attr.header.typeID = API_ModelViewOptionsID;
-				attr.header.index = i;
-				GS::UniString name;
-				attr.header.uniStringNamePtr = &name;
-				if (ACAPI_Attribute_Get (&attr) != NoError)
-					continue;
-				if (std::memcmp (&attr.modelViewOpt.modelViewOpt, &vo.modelViewOpt, offsetof (API_ModelViewOptions, gdlOptions)) == 0)
-					matching.Push (OS ("index", (Int32) i, "name", name, "guid", GuidStr (attr.header.guid)));
-				ACAPI_FreeGDLModelViewOptionsPtr (&attr.modelViewOpt.modelViewOpt.gdlOptions);
-			}
+		const GS::Array<Int32> indices = AttrIndices (API_ModelViewOptionsID);
+		for (const Int32 i : indices) {
+			API_ModelViewOptions options = {};
+			GS::UniString name;
+			API_Guid guid = APINULLGuid;
+			if (!GetModelViewOptions (AttrIndexFromInt (i), options, &name, &guid))
+				continue;
+			if (std::memcmp (&options, &vo.modelViewOpt, offsetof (API_ModelViewOptions, gdlOptions)) == 0)
+				matching.Push (OS ("index", i, "name", name, "guid", GuidStr (guid)));
+			ACAPI_FreeGDLModelViewOptionsPtr (&options.gdlOptions);
 		}
 		ACAPI_FreeGDLModelViewOptionsPtr (&vo.modelViewOpt.gdlOptions);
 		out.Add ("modelViewOptions", OS ("matchingCombinations", matching, "note",
@@ -972,18 +983,16 @@ OS CurrentViewSettingsJson ()
 
 void ApplyModelViewOptionsToCurrent (API_AttributeIndex index)
 {
-	API_Attribute attr;
-	BNZeroMemory (&attr, sizeof (attr));
-	attr.header.typeID = API_ModelViewOptionsID;
-	attr.header.index = index;
-	Check (ACAPI_Attribute_Get (&attr), "Cannot read the model view options combination");
-	auto freeAttr = MakeScopeExit ([&] () { ACAPI_FreeGDLModelViewOptionsPtr (&attr.modelViewOpt.modelViewOpt.gdlOptions); });
+	API_ModelViewOptions options = {};
+	if (!GetModelViewOptions (index, options, nullptr, nullptr))
+		Fail ("Cannot read the model view options combination " + GS::ValueToUniString (AttrIndexToInt (index)) + ".", APIERR_BADINDEX);
+	auto freeAttr = MakeScopeExit ([&] () { ACAPI_FreeGDLModelViewOptionsPtr (&options.gdlOptions); });
 
 	API_ViewOptions vo;
 	BNZeroMemory (&vo, sizeof (vo));
 	Check (ACAPI_Environment (APIEnv_GetViewOptionsID, &vo, nullptr), "Cannot read the current view options");
 	ACAPI_FreeGDLModelViewOptionsPtr (&vo.modelViewOpt.gdlOptions);
-	vo.modelViewOpt = attr.modelViewOpt.modelViewOpt;		// gdlOptions stays owned by attr
+	vo.modelViewOpt = options;		// gdlOptions stays owned by `options`
 	CallApi ("Apply model view options", [&] () {
 		API_ViewOptions v = vo;
 		return ACAPI_Environment (APIEnv_ChangeViewOptionsID, &v, nullptr);

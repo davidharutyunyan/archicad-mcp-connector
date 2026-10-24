@@ -365,7 +365,7 @@ OS CutPlanesJson ()
 		const Int32 available = (Int32) (BMGetHandleSize (reinterpret_cast<GSConstHandle> (c.shapes)) / sizeof (API_3DCutShapeType));
 		for (Int32 i = 0; i < c.nShapes && i < available; ++i) {
 			const API_3DCutShapeType& s = (*c.shapes)[i];
-			OS shape ("status", (Int32) s.cutStatus, "pen", (Int32) s.cutPen, "material", (Int32) s.cutMater);
+			OS shape ("status", (Int32) s.cutStatus, "pen", (Int32) s.cutPen, "material", AttrIndexToInt (s.cutMater));
 			shape.Add ("a", s.pa);
 			shape.Add ("b", s.pb);
 			shape.Add ("c", s.pc);

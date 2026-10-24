@@ -3,11 +3,12 @@
   Builds the Claude Connector add-on for Archicad on Windows (x64 .apx) and optionally installs it.
 
 .DESCRIPTION
-  Needs Visual Studio 2019, 2022 or 2026 (or its Build Tools) with the Visual Studio 2019 C++ toolset (v142):
-  the Archicad 25-27 API headers refuse any other compiler. Visual Studio 2022/2026: Visual Studio Installer >
-  Modify > Individual components > "MSVC v142 - VS 2019 C++ x64/x86 build tools". Also needs CMake (on PATH, or
-  the copy bundled with Visual Studio) and Python 3. Downloads the official Archicad API DevKit for Windows into
-  .devkit\ on the first run. Works on x64 and ARM64 Windows (the add-on is always x64, like Archicad).
+  Needs Visual Studio 2019, 2022 or 2026 (or its Build Tools) with the C++ toolset the Archicad API headers accept:
+  Archicad 25-28: the Visual Studio 2019 toolset (v142; Visual Studio 2022/2026: Visual Studio Installer > Modify >
+  Individual components > "MSVC v142 - VS 2019 C++ x64/x86 build tools"); Archicad 29: the Visual Studio 2022
+  toolset (v143). Also needs CMake (on PATH, or the copy bundled with Visual Studio) and Python 3. Downloads the
+  official Archicad API DevKit for Windows into .devkit\ on the first run. Works on x64 and ARM64 Windows (the
+  add-on is always x64, like Archicad).
 
   The add-on ID (MDID) comes from addon\mdid.local.cmake, or from -MdidDeveloper / -MdidLocal; without one the
   add-on builds, but licensed Archicad refuses to load it.
@@ -16,12 +17,14 @@
   powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1 -Install
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File scripts\windows\build-addon.ps1 -ArchicadVersion 29 -Install
 #>
 param(
 	[string] $ArchicadVersion = "26",
 	[string] $DevKitTag = "",
 	[string] $BuildDir = "",
-	[string] $Toolset = "v142",		# the Visual Studio 2019 toolset required by the Archicad 25-27 API
+	[string] $Toolset = "",			# default: v142 (Visual Studio 2019) for Archicad 25-28, v143 (Visual Studio 2022) for 29
 	[string] $MdidDeveloper = "",
 	[string] $MdidLocal = "",
 	[switch] $Install,
@@ -32,12 +35,13 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"	# Invoke-WebRequest is very slow with the progress bar
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$tags = @{ "25" = "25.3002"; "26" = "26.3000"; "27" = "27.3001" }
+$tags = @{ "25" = "25.3002"; "26" = "26.3000"; "27" = "27.6003"; "28" = "28.4001"; "29" = "29.3100" }
 if (-not $DevKitTag) {
 	if (-not $tags.ContainsKey($ArchicadVersion)) { throw "No DevKit tag known for Archicad $ArchicadVersion; pass -DevKitTag." }
 	$DevKitTag = $tags[$ArchicadVersion]
 }
-if (-not $BuildDir) { $BuildDir = Join-Path $repo "addon\build-win" }
+if (-not $Toolset) { $Toolset = if ([int]$ArchicadVersion -ge 29) { "v143" } else { "v142" } }
+if (-not $BuildDir) { $BuildDir = Join-Path $repo "addon\build-win-ac$ArchicadVersion" }
 
 function Find-Tool([string] $name, [string[]] $extra) {
 	$cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -50,16 +54,26 @@ function Find-Tool([string] $name, [string[]] $extra) {
 # Pick the newest installation that has the requested toolset (v142 = MSVC 14.2x) and use its CMake generator.
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path $vswhere)) {
-	throw "Visual Studio was not found. Install 'Build Tools for Visual Studio' with the 'Desktop development with C++' workload and the 'MSVC v142 - VS 2019 C++ x64/x86 build tools' component."
+	throw "Visual Studio was not found. Install 'Build Tools for Visual Studio' with the 'Desktop development with C++' workload (Archicad 25-28 also need the 'MSVC v142 - VS 2019 C++ x64/x86 build tools' component)."
 }
-$toolsetPrefix = @{ "v142" = "14.2"; "v143" = "14.3"; "v145" = "14.5" }[$Toolset]
+# MSVC directory versions per toolset (v143 = Visual Studio 2022 = MSVC 14.30-14.4x).
+$toolsetPrefixes = @{ "v142" = @("14.2"); "v143" = @("14.3", "14.4"); "v145" = @("14.5") }[$Toolset]
+function Test-Toolset([string] $vsPath) {
+	if (-not $toolsetPrefixes) { return $true }
+	$msvc = Get-ChildItem (Join-Path $vsPath "VC\Tools\MSVC") -Directory -ErrorAction SilentlyContinue
+	foreach ($prefix in $toolsetPrefixes) { if ($msvc | Where-Object { $_.Name -like "$prefix*" }) { return $true } }
+	return $false
+}
 $generators = @{ "16" = "Visual Studio 16 2019"; "17" = "Visual Studio 17 2022"; "18" = "Visual Studio 18 2026" }
 $vs = & $vswhere -all -prerelease -products * -format json | ConvertFrom-Json |
 	Where-Object { $generators.ContainsKey($_.installationVersion.Split(".")[0]) } |
-	Where-Object { -not $toolsetPrefix -or (Get-ChildItem (Join-Path $_.installationPath "VC\Tools\MSVC") -Directory -Filter "$toolsetPrefix*" -ErrorAction SilentlyContinue) } |
+	Where-Object { Test-Toolset $_.installationPath } |
 	Sort-Object { [version]$_.installationVersion } -Descending | Select-Object -First 1
 if (-not $vs) {
-	throw "No Visual Studio installation with the $Toolset C++ toolset was found. In the Visual Studio Installer choose Modify > Individual components > 'MSVC v142 - VS 2019 C++ x64/x86 build tools' (Archicad 25-27 add-ons must be built with it)."
+	if ($Toolset -eq "v142") {
+		throw "No Visual Studio installation with the v142 C++ toolset was found. In the Visual Studio Installer choose Modify > Individual components > 'MSVC v142 - VS 2019 C++ x64/x86 build tools' (Archicad 25-28 add-ons must be built with it)."
+	}
+	throw "No Visual Studio installation with the $Toolset C++ toolset was found (Archicad 29 add-ons need Visual Studio 2022 or its Build Tools, toolset v143)."
 }
 $vsPath = $vs.installationPath
 $generator = $generators[$vs.installationVersion.Split(".")[0]]
@@ -79,7 +93,8 @@ Write-Host "CMake:         $cmake"
 # --- DevKit ---------------------------------------------------------------------
 $devkitRoot = Join-Path $repo ".devkit"
 $devkit = Join-Path $devkitRoot "devkit$ArchicadVersion"
-if (-not (Test-Path (Join-Path $devkit "Support\Lib\Win\ACAP_STAT.lib"))) {
+$hasLib = (Test-Path (Join-Path $devkit "Support\Lib\Win\ACAP_STAT.lib")) -or (Test-Path (Join-Path $devkit "Support\Lib\ACAP_STAT.lib"))
+if (-not $hasLib) {
 	New-Item -ItemType Directory -Force -Path $devkitRoot | Out-Null
 	$zipName = "API.Development.Kit.WIN.$DevKitTag.zip"
 	$zip = Join-Path $devkitRoot $zipName

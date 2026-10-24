@@ -42,7 +42,6 @@ struct ListKindCounts {
 ListKindCounts	CountListKinds (const OS& os, const char* key);
 GS::UniString	JoinNames (const GS::Array<GS::UniString>& names, const char* sep = ", ");
 // Case-insensitive substring test (GS::UniString::Contains has no case parameter!).
-bool			ContainsNoCase (const GS::UniString& haystack, const GS::UniString& needle);
 
 // --- Library part helpers ----------------------------------------------------------------
 

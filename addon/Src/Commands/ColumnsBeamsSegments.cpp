@@ -233,39 +233,6 @@ OS LineStyleJson (const short* pen, const API_AttributeIndex* lineType)
 }
 
 
-static bool ApplyOnePenOverride (const OS& spec, const char* key, bool& overridden, short& pen)
-{
-	if (!spec.Contains (key))
-		return false;
-	if (spec.IsBool (key)) {
-		if (GetBool (spec, key))
-			Fail ("'" + GS::UniString (key) + "' must be a pen index 1..255, or false to use the pen of the structure.");
-		overridden = false;
-		return true;
-	}
-	pen = *OptPen (spec, key);
-	overridden = true;
-	return true;
-}
-
-
-bool ApplyPenOverride (const OS& spec, API_PenOverrideType& po)
-{
-	bool changed = ApplyOnePenOverride (spec, "cutFillPen", po.overrideCutFillPen, po.cutFillPen);
-	changed |= ApplyOnePenOverride (spec, "cutFillBackgroundPen", po.overrideCutFillBackgroundPen, po.cutFillBackgroundPen);
-	return changed;
-}
-
-
-void AddPenOverrideJson (OS& out, const API_PenOverrideType& po)
-{
-	if (po.overrideCutFillPen)
-		out.Add ("cutFillPen", (Int32) po.cutFillPen);
-	if (po.overrideCutFillBackgroundPen)
-		out.Add ("cutFillBackgroundPen", (Int32) po.cutFillBackgroundPen);
-}
-
-
 bool ApplyCoverFill (const OS& spec, const CoverFillRefs& r)
 {
 	if (!spec.Contains ("coverFill"))
@@ -448,7 +415,7 @@ void AddSectionJson (OS& out, const API_AssemblySegmentData& d, const SectionKey
 			out.Add (k.endDepth, d.endHeight);
 		}
 	}
-	AddStructureJson (out, d.modelElemStructureType, d.buildingMaterial, 0, d.profileAttr);
+	AddStructureJson (out, d.modelElemStructureType, d.buildingMaterial, AttrIndexFromInt (0), d.profileAttr);
 }
 
 // --- Schemes ------------------------------------------------------------------------------

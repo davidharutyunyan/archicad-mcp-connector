@@ -86,7 +86,7 @@ bool ApplyNoteFields (API_NoteType& note, API_NoteType* m, const OS& spec, Strin
 			Fail ("textSize must be a positive character height in paper millimeters (e.g. 2.5).");
 		note.noteSize = *v; NOTE_SET (noteSize); changed = true;
 	}
-	if (auto f = OptAttr (API_FontID, spec, "textFont"))	{ note.noteFont = (short) *f; NOTE_SET (noteFont); changed = true; }
+	if (auto f = OptAttr (API_FontID, spec, "textFont"))	{ note.noteFont = (short) AttrIndexToInt (*f); NOTE_SET (noteFont); changed = true; }
 	auto face = [&] (const char* key, unsigned short bit) {
 		if (auto b = OptBool (spec, key)) {
 			if (*b) note.faceBits = (unsigned short) (note.faceBits | bit);
@@ -175,7 +175,7 @@ void AddNoteJson (OS& out, const API_NoteType& note, const GS::UniString* custom
 {
 	out.Add ("textPen", (Int32) note.notePen);
 	out.Add ("textSize", note.noteSize);
-	out.Add ("textFont", AttrRef (API_FontID, note.noteFont));
+	out.Add ("textFont", AttrRef (API_FontID, AttrIndexFromInt (note.noteFont)));
 	out.Add ("textBold", (note.faceBits & APIFace_Bold) != 0);
 	out.Add ("textItalic", (note.faceBits & APIFace_Italic) != 0);
 	out.Add ("textUnderline", (note.faceBits & APIFace_Underline) != 0);
