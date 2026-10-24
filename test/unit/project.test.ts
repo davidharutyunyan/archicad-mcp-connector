@@ -144,6 +144,15 @@ describe("save", () => {
     });
   });
 
+  it("save_project_as maps 'previous' to the format of the version before the running Archicad", async () => {
+    const h29 = await harness(() => addonOk({ saved: true }), { archicadVersion: 29 });
+    await h29.call("save_project_as", { path: "C:\\Projects\\House.pln", format: "previous" });
+    expect(h29.requests[0]?.addOnParameters).toEqual({ path: "C:\\Projects\\House.pln", format: "pln28" });
+    const h26 = await harness(() => addonOk({ saved: true }));
+    await h26.call("save_project_as", { path: "/tmp/House.pla", format: "previous-archive" });
+    expect(h26.requests[0]?.addOnParameters).toEqual({ path: "/tmp/House.pla", format: "pla25" });
+  });
+
   it("save_project_as rejects unknown formats", async () => {
     const h = await harness(() => addonOk({}));
     const res = await h.call("save_project_as", { path: "/tmp/a.ifc", format: "ifc" });

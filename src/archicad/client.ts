@@ -61,6 +61,8 @@ export class ArchicadClient {
   private readonly fixedPort: boolean;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  /** Archicad main version per port (from API.GetProductInfo). */
+  private readonly versions = new Map<number, number>();
 
   constructor(options: ClientOptions = {}) {
     this.host = options.host ?? "127.0.0.1";
@@ -77,6 +79,17 @@ export class ArchicadClient {
   /** Switch to another Archicad instance (see listInstances). */
   usePort(port: number): void {
     this.port = port;
+  }
+
+  /** Main version of the connected Archicad (26, 27, ...), asked once per instance. */
+  async archicadVersion(): Promise<number> {
+    const port = await this.resolvePort();
+    const known = this.versions.get(port);
+    if (known !== undefined) return known;
+    const info = await this.api<{ version?: number }>("API.GetProductInfo");
+    const version = typeof info.version === "number" ? info.version : 26;
+    if (this.port === port) this.versions.set(port, version);
+    return version;
   }
 
   private async rawPost(port: number, body: Json, timeoutMs: number): Promise<ApiResponse> {
@@ -208,7 +221,8 @@ export class ArchicadClient {
           );
         }
       }
-      // The instance may have been restarted on another port: rediscover once.
+      // The instance may have been restarted (possibly another version) or moved to another port: rediscover once.
+      if (err instanceof ArchicadConnectionError && !err.message.includes("did not answer")) this.versions.delete(port);
       if (err instanceof ArchicadConnectionError && !this.fixedPort && !(err.message.includes("did not answer"))) {
         this.port = undefined;
         const newPort = await this.resolvePort();

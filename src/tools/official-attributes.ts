@@ -13,8 +13,10 @@ import {
   execResults,
   folderJson,
   folderLabel,
+  folderPath,
   FolderRef,
   getAttributeDetails,
+  gid,
   hexToRgb,
   innerGuid,
   OfficialAttributeType,
@@ -60,6 +62,65 @@ function hintFolderError(e: unknown, type: string): Error {
   return e instanceof Error ? e : new Error(msg);
 }
 
+// --- Archicad 27+ ---------------------------------------------------------------------------------------
+// Archicad 27 replaced the path-based folder commands (GetAttributeFolder, GetAttributeFolderContent, RenameAttributeFolder)
+// by GUID-based ones (GetAttributeFolderStructure, GetAttributeFolders, RenameAttributeFolders); DeleteAttributeFolders and
+// MoveAttributesAndFolders take folder GUIDs there. Paths stay relative to the root folder ([] = root) on every version.
+
+interface FolderNode {
+  attributeFolderId?: unknown;
+  name?: string;
+  attributes?: Array<{ attribute?: { attributeId?: unknown; name?: string } }>;
+  subfolders?: Array<{ attributeFolder?: FolderNode }>;
+}
+
+async function guidFolders(ac: ArchicadClient): Promise<boolean> {
+  return (await ac.archicadVersion()) >= 27;
+}
+
+async function folderStructure(ac: ArchicadClient, type: AttributeType, path: string[]): Promise<FolderNode> {
+  const res = await ac.api<{ attributeFolder?: FolderNode }>("API.GetAttributeFolderStructure", { attributeType: type, path });
+  return res.attributeFolder ?? {};
+}
+
+/** Root-relative path of a folder (the paths of GetAttributeFolders start with the root folder's own name). */
+async function folderPathByGuid(ac: ArchicadClient, guid: string): Promise<string[]> {
+  const res = await ac.api<{ attributeFolders?: unknown[] }>("API.GetAttributeFolders", { attributeFolderIds: [{ attributeFolderId: gid(guid) }] });
+  const u = unwrap<Json>(res.attributeFolders?.[0]);
+  if (!u.ok) throw new Error(u.error);
+  const p = u.value["path"];
+  return Array.isArray(p) ? (p as string[]).slice(1) : [];
+}
+
+async function resolveFolder(ac: ArchicadClient, type: AttributeType, ref: FolderRefT): Promise<{ guid: string; path: string[] }> {
+  if (typeof ref === "object" && !Array.isArray(ref)) return { guid: gid(ref.guid).guid, path: await folderPathByGuid(ac, ref.guid) };
+  const path = folderPath(ref);
+  const guid = innerGuid((await folderStructure(ac, type, path)).attributeFolderId);
+  if (!guid) throw new Error(`Attribute folder not found: "/${path.join("/")}".`);
+  return { guid, path };
+}
+
+function folderOut(node: FolderNode, path: string[], level: number, maxDepth: number, withAttrs: boolean): FolderOut {
+  const out: FolderOut = { path };
+  const g = innerGuid(node.attributeFolderId);
+  if (g) out.guid = g;
+  const attrs = (node.attributes ?? [])
+    .map((a) => ({ guid: innerGuid(a.attribute?.attributeId) ?? "", name: a.attribute?.name }))
+    .filter((a) => a.guid);
+  if (withAttrs) out.attributes = attrs;
+  else out.attributeCount = attrs.length;
+  const subs = (node.subfolders ?? []).map((s) => s.attributeFolder ?? {});
+  if (subs.length) {
+    if (level < maxDepth) out.subfolders = subs.map((s) => folderOut(s, [...path, s.name ?? ""], level + 1, maxDepth, withAttrs));
+    else out.subfolderCount = subs.length;
+  }
+  return out;
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 const FolderItem = z.union([
   FolderRef,
   z.object({ attributeType: OfficialAttributeType.optional(), path: z.union([z.array(z.string().min(1)), z.string()]) }),
@@ -97,6 +158,15 @@ export function registerOfficialAttributeTools(server: McpServer, ctx: ToolConte
       const type = attributeType as AttributeType;
       const maxDepth = depth ?? 1;
       const withAttrs = includeAttributes !== false;
+      if (await guidFolders(ac)) {
+        try {
+          const ref = (folder ?? []) as FolderRefT;
+          const path = typeof ref === "object" && !Array.isArray(ref) ? await folderPathByGuid(ac, ref.guid) : folderPath(ref);
+          return { attributeType: type, ...folderOut(await folderStructure(ac, type, path), path, 0, maxDepth, withAttrs) };
+        } catch (e) {
+          throw hintFolderError(e, type);
+        }
+      }
       let rootJson: Json;
       try {
         const r = await ac.api<{ attributeFolder?: Json }>("API.GetAttributeFolder", { attributeFolder: folderJson(type, (folder ?? []) as FolderRefT) });
@@ -151,6 +221,7 @@ export function registerOfficialAttributeTools(server: McpServer, ctx: ToolConte
     annotations: CREATES,
     handler: async ({ attributeType, folders }, { ac }) => {
       const specs = folders.map((f) => folderOf(attributeType as AttributeType | undefined, f as FolderItemT));
+      const modern = await guidFolders(ac);
       const res = await ac.api<{ executionResults?: unknown[] }>("API.CreateAttributeFolders", {
         attributeFolders: specs.map((s) => folderJson(s.type, s.ref)),
       });
@@ -160,8 +231,11 @@ export function registerOfficialAttributeTools(server: McpServer, ctx: ToolConte
           const row: Json = { attributeType: s.type, folder: folderLabel(s.ref), ...(r[i] ?? { error: "no result" }) };
           if ("ok" in row) {
             try {
-              const f = await ac.api<{ attributeFolder?: Json }>("API.GetAttributeFolder", { attributeFolder: folderJson(s.type, s.ref) });
-              row["guid"] = innerGuid(f.attributeFolder?.["attributeFolderId"]);
+              if (modern) row["guid"] = (await resolveFolder(ac, s.type, s.ref)).guid;
+              else {
+                const f = await ac.api<{ attributeFolder?: Json }>("API.GetAttributeFolder", { attributeFolder: folderJson(s.type, s.ref) });
+                row["guid"] = innerGuid(f.attributeFolder?.["attributeFolderId"]);
+              }
             } catch {
               /* optional */
             }
@@ -193,6 +267,30 @@ export function registerOfficialAttributeTools(server: McpServer, ctx: ToolConte
           if (p.length === 0) throw new Error("Refusing to delete the root attribute folder.");
         }
       }
+      if (await guidFolders(ac)) {
+        const rows = await Promise.all(
+          specs.map(async (s): Promise<Json> => {
+            const row: Json = { attributeType: s.type, folder: folderLabel(s.ref) };
+            try {
+              const f = await resolveFolder(ac, s.type, s.ref);
+              if (f.path.length === 0) row["error"] = "Refusing to delete the root attribute folder.";
+              else row["guid"] = f.guid;
+            } catch (e) {
+              row["error"] = errorText(e);
+            }
+            return row;
+          }),
+        );
+        const todo = rows.filter((r) => typeof r["guid"] === "string");
+        const res = todo.length
+          ? await ac.api<{ executionResults?: unknown[] }>("API.DeleteAttributeFolders", {
+              attributeFolderIds: todo.map((r) => ({ attributeFolderId: gid(r["guid"] as string) })),
+            })
+          : {};
+        const r = execResults(res.executionResults);
+        todo.forEach((row, i) => Object.assign(row, r[i] ?? { error: "no result" }));
+        return { results: rows };
+      }
       const res = await ac.api<{ executionResults?: unknown[] }>("API.DeleteAttributeFolders", {
         attributeFolders: specs.map((s) => folderJson(s.type, s.ref)),
       });
@@ -219,7 +317,15 @@ export function registerOfficialAttributeTools(server: McpServer, ctx: ToolConte
       if (!attributes?.length && !folders?.length) throw new Error("Pass 'attributes' and/or 'folders' to move.");
       const resolved = attributes?.length ? await resolveAttributes(ac, type, attributes as OfficialAttrRefT[]) : [];
       try {
-        await ac.api("API.MoveAttributesAndFolders", {
+        if (await guidFolders(ac)) {
+          const targetFolder = await resolveFolder(ac, type, target as FolderRefT);
+          const moved = await Promise.all((folders ?? []).map((f) => resolveFolder(ac, type, f as FolderRefT)));
+          await ac.api("API.MoveAttributesAndFolders", {
+            attributeFolderIds: moved.map((f) => ({ attributeFolderId: gid(f.guid) })),
+            attributeIds: attrIdItems(resolved.map((r) => r.guid)),
+            targetFolderId: gid(targetFolder.guid),
+          });
+        } else await ac.api("API.MoveAttributesAndFolders", {
           folders: (folders ?? []).map((f) => folderJson(type, f as FolderRefT)),
           attributeIds: attrIdItems(resolved.map((r) => r.guid)),
           targetFolder: folderJson(type, target as FolderRefT),
@@ -244,6 +350,21 @@ export function registerOfficialAttributeTools(server: McpServer, ctx: ToolConte
     handler: async ({ attributeType, folder, newName }, { ac }) => {
       const type = attributeType as AttributeType;
       const f = folder as FolderRefT;
+      if (await guidFolders(ac)) {
+        let current: { guid: string; path: string[] };
+        try {
+          current = await resolveFolder(ac, type, f);
+        } catch (e) {
+          throw hintFolderError(e, type);
+        }
+        if (current.path.length === 0) throw new Error("The root attribute folder cannot be renamed.");
+        const res = await ac.api<{ executionResults?: unknown[] }>("API.RenameAttributeFolders", {
+          attributeFolderParametersList: [{ attributeFolderId: gid(current.guid), newName }],
+        });
+        const r = execResults(res.executionResults)[0];
+        if (r && "error" in r) throw new Error(r.error);
+        return { ok: true, folder: { path: await folderPathByGuid(ac, current.guid), guid: current.guid } };
+      }
       let guid: string | undefined;
       try {
         const cur = await ac.api<{ attributeFolder?: Json }>("API.GetAttributeFolder", { attributeFolder: folderJson(type, f) });

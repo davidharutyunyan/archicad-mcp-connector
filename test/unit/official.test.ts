@@ -369,6 +369,16 @@ describe("elements", () => {
     expect(j.zones[1].error).toContain("not a zone");
   });
 
+  it("get_elements_related_to_zones asks for all types on Archicad 29 (elementTypes became required)", async () => {
+    const respond = fakeApi({ GetElementsRelatedToZones: () => ({ elementsRelatedToZones: [{ elements: [] }] }), GetTypesOfElements: typesHandler });
+    const h29 = await harness(respond, { archicadVersion: 29 });
+    await h29.call("get_elements_related_to_zones", { zones: [Z1] });
+    expect(h29.requests[0]?.parameters).toEqual({ zones: [{ elementId: { guid: Z1 } }], elementTypes: ["All"] });
+    const h26 = await harness(respond);
+    await h26.call("get_elements_related_to_zones", { zones: [Z1] });
+    expect(h26.requests[0]?.parameters).toEqual({ zones: [{ elementId: { guid: Z1 } }] });
+  });
+
   it("get_element_components reads the default summary and converts nothing but angles", async () => {
     const h = await harness(
       fakeApi({
@@ -1094,6 +1104,79 @@ describe("attributes", () => {
       attributeFolder: { attributeType: "Layer", path: ["Проект"] },
       newName: "Проект 2",
     });
+  });
+
+  it("Archicad 27+: folders are browsed with GetAttributeFolderStructure and addressed by GUID", async () => {
+    const SUB = "0C21AD63-0A00-4098-B3F6-5578E2A51E99";
+    const structure = {
+      attributeFolderId: { guid: SYS },
+      name: "Fills",
+      attributes: [{ attribute: { attributeId: { guid: LAYER1 }, name: "Background" } }],
+      subfolders: [
+        {
+          attributeFolder: {
+            attributeFolderId: { guid: FOLDER },
+            name: "Masonry",
+            attributes: [{ attribute: { attributeId: { guid: LAYER2 }, name: "Brick" } }],
+            subfolders: [{ attributeFolder: { attributeFolderId: { guid: SUB }, name: "Old" } }],
+          },
+        },
+      ],
+    };
+    const pathOf: Record<string, string[]> = { [SYS]: ["Fills"], [FOLDER]: ["Fills", "Masonry"], [SUB]: ["Fills", "Masonry", "Old"] };
+    const h = await harness(
+      fakeApi({
+        GetAttributeFolderStructure: (p) =>
+          (p.path ?? []).length === 0
+            ? { attributeFolder: structure }
+            : p.path[0] === "Masonry"
+              ? { attributeFolder: p.path.length === 1 ? structure.subfolders[0]!.attributeFolder : { attributeFolderId: { guid: SUB }, name: "Old" } }
+              : { succeeded: false, error: { code: 6108, message: `Attribute folder not found: "/${p.path.join("/")}".` } },
+        GetAttributeFolders: (p) => ({
+          attributeFolders: p.attributeFolderIds.map((x: any) => ({ attributeFolder: { attributeType: "Fill", path: pathOf[x.attributeFolderId.guid], attributeFolderId: x.attributeFolderId } })),
+        }),
+        CreateAttributeFolders: (p) => ({ executionResults: p.attributeFolders.map(() => ({ success: true })) }),
+        DeleteAttributeFolders: (p) => ({ executionResults: p.attributeFolderIds.map(() => ({ success: true })) }),
+        MoveAttributesAndFolders: () => ({}),
+        RenameAttributeFolders: (p) => ({ executionResults: p.attributeFolderParametersList.map(() => ({ success: true })) }),
+      }),
+      { archicadVersion: 29 },
+    );
+
+    const tree = await h.call("get_attribute_folders", { attributeType: "Fill", depth: 1 });
+    expect(tree.json).toEqual({
+      attributeType: "Fill",
+      path: [],
+      guid: SYS,
+      attributes: [{ guid: LAYER1, name: "Background" }],
+      subfolders: [{ path: ["Masonry"], guid: FOLDER, attributes: [{ guid: LAYER2, name: "Brick" }], subfolderCount: 1 }],
+    });
+    const byGuid = (await h.call("get_attribute_folders", { attributeType: "Fill", folder: { guid: FOLDER }, depth: 0 })).json as any;
+    expect(byGuid).toMatchObject({ path: ["Masonry"], guid: FOLDER, subfolderCount: 1 });
+    expect(h.requests.some((r) => r.command === "API.GetAttributeFolder" || r.command === "API.GetAttributeFolderContent")).toBe(false);
+
+    const created = (await h.call("create_attribute_folders", { attributeType: "Fill", folders: ["Masonry"] })).json as any;
+    expect(created.results[0]).toMatchObject({ folder: "/Masonry", ok: true, guid: FOLDER });
+
+    const deleted = (await h.call("delete_attribute_folders", { attributeType: "Fill", folders: ["Masonry/Old", "Nope", { guid: SYS }] })).json as any;
+    expect(h.requests.find((r) => r.command === "API.DeleteAttributeFolders")?.parameters).toEqual({ attributeFolderIds: [{ attributeFolderId: { guid: SUB } }] });
+    expect(deleted.results[0]).toMatchObject({ folder: "/Masonry/Old", ok: true });
+    expect(deleted.results[1].error).toContain("not found");
+    expect(deleted.results[2].error).toContain("root");
+
+    await h.call("move_attributes_to_folder", { attributeType: "Fill", target: { guid: FOLDER }, attributes: [LAYER1], folders: ["Masonry/Old"] });
+    expect(h.requests.find((r) => r.command === "API.MoveAttributesAndFolders")?.parameters).toEqual({
+      attributeFolderIds: [{ attributeFolderId: { guid: SUB } }],
+      attributeIds: [{ attributeId: { guid: LAYER1 } }],
+      targetFolderId: { guid: FOLDER },
+    });
+
+    expect((await h.call("rename_attribute_folder", { attributeType: "Fill", folder: [], newName: "X" })).isError).toBe(true);
+    const renamed = await h.call("rename_attribute_folder", { attributeType: "Fill", folder: "Masonry", newName: "Stone" });
+    expect(h.requests.find((r) => r.command === "API.RenameAttributeFolders")?.parameters).toEqual({
+      attributeFolderParametersList: [{ attributeFolderId: { guid: FOLDER }, newName: "Stone" }],
+    });
+    expect(renamed.json).toEqual({ ok: true, folder: { path: ["Masonry"], guid: FOLDER } });
   });
 
   it("get_profile_preview returns PNG image content plus profile info", async () => {

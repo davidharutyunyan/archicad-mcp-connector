@@ -31,10 +31,19 @@ export function apiOk(result: unknown) {
   return { succeeded: true, result };
 }
 
-export async function harness(responder: Responder) {
+export interface HarnessOptions {
+  /** Main version the fake Archicad reports through API.GetProductInfo (default 26); that query is not recorded. */
+  archicadVersion?: number;
+}
+
+export async function harness(responder: Responder, options: HarnessOptions = {}) {
   const requests: RecordedRequest[] = [];
   const fetchImpl = (async (_url: string, init?: { body?: string }) => {
     const body = JSON.parse(init?.body ?? "{}") as { command: string; parameters?: Record<string, unknown> };
+    if (body.command === "API.GetProductInfo") {
+      const info = { succeeded: true, result: { version: options.archicadVersion ?? 26, buildNumber: 3000, languageCode: "INT" } };
+      return new Response(JSON.stringify(info), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     const req: RecordedRequest = { command: body.command, parameters: body.parameters };
     if (body.command === "API.ExecuteAddOnCommand") {
       const p = body.parameters as { addOnCommandId: { commandName: string }; addOnCommandParameters: Record<string, unknown> };

@@ -115,7 +115,7 @@ Creates straight, curved, trapezoid or slanted walls (one undo step). Coordinate
 | `walls[].begin` | object | yes | Start point of the wall reference line |
 | `walls[].end` | object | yes | End point of the wall reference line |
 | `walls[].height` | number |  | Height in m. Giving a height unlinks the wall top unless topLinkedStory is also given |
-| `walls[].thickness` | number |  | Thickness in m (ignored for composite walls: the composite defines it) |
+| `walls[].thickness` | number |  | Thickness in m. A composite defines its own thickness: with 'composite' this is ignored; without composite/buildingMaterial/profile it makes a Composite/Profile wall (e.g. the template default) Basic, keeping its building material |
 | `walls[].endThickness` | number |  | Thickness at the end point; makes a trapezoid wall |
 | `walls[].bottomOffset` | number |  | Bottom elevation relative to the home story level (m); the wall then spans bottomOffset .. bottomOffset + height |
 | `walls[].topLinkedStory` | integer |  | Link the top to the story N levels above the home story (0 = unlinked, use height) |
@@ -187,15 +187,15 @@ Saves the open project to its own file (File > Save). Fails for untitled (never 
 
 ### `save_project_as`
 
-Saves the project under a new file (File > Save As). Afterwards the open project refers to the NEW file. Formats: pln (solo project), pla (archive incl. library parts), tpl (template), pln25/pla25 (Archicad 25 = previous version). The format defaults to the path extension; a missing extension is added. For IFC/DWG/PDF/image exports use the export tools instead. Returns {saved, format, file, project}.
+Saves the project under a new file (File > Save As). Afterwards the open project refers to the NEW file. Formats: pln (solo project), pla (archive incl. library parts), tpl (template), previous / previous-archive (the previous Archicad version, the only one Archicad can save back to: Archicad 26 -> pln25/pla25, 27 -> pln26/pla26, 28 -> pln27/pla27, 29 -> pln28/pla28). The format defaults to the path extension; a missing extension is added. For IFC/DWG/PDF/image exports use the export tools instead. Returns {saved, format, file, project}.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `path` | string | yes | Absolute target path on the Archicad machine, e.g. '/Users/me/Projects/House.pln' |
-| `format` | "pln" \\| "pla" \\| "tpl" \\| "pln25" \\| "pla25" |  | File format (default: from the extension, else pln) |
+| `format` | "pln" \\| "pla" \\| "tpl" \\| "previous" \\| "previous-archive" \\| "pln25" \\| "pla25" \\| "pln26" \\| "pla26" \\| "pln27" \\| "pla27" \\| "pln28" \\| "pla28" |  | File format (default: from the extension, else pln). 'previous' = project, 'previous-archive' = archive of the previous version |
 | `overwrite` | boolean |  | Replace an existing file (default false: fails if the file exists) |
 | `createFolders` | boolean |  | Create missing parent folders (default false) |
-| `archive` | object |  | Options for pla/pla25 archives |
+| `archive` | object |  | Options for pla and previous-version archives |
 | `archive.includeTextures` | boolean |  | default true |
 | `archive.includeBackgroundPictures` | boolean |  | default true |
 | `archive.includePropertyObjects` | boolean |  | Include property library parts (default true) |
@@ -2230,6 +2230,7 @@ Creates Opening-tool openings: rectangular or circular extrusion bodies that cut
 | `openings[].connectionMode` | "Connected" \\| "Disconnected" |  | Floor plan connection mode |
 | `openings[].outlinesStyle` | "HideBorder" \\| "ShowUncutBorder" \\| "ShowOverheadBorder" |  | Floor plan outline style |
 | `openings[].showReferenceAxis` | boolean |  | Show the opening's reference axis on the floor plan |
+| `openings[].cutElements` | any[] |  | Archicad 29+: further elements the opening cuts besides its owner (e.g. a wall lining, a second slab) |
 | `openings[].layer` | integer \\| string \\| object |  | Layer name or index (defaults to the tool's default layer) |
 | `openings[].layer.index` | integer | yes |  |
 | `openings[].renovationStatus` | "Existing" \\| "New" \\| "Demolished" \\| "Default" |  | Renovation status |
@@ -2272,6 +2273,9 @@ Changes existing windows, doors, skylights and Opening-tool openings in one undo
 | `openings[].fixMode` | "Horizontal" \\| "Vertical" |  | Skylights |
 | `openings[].azimuthAngle` | number |  | Skylights: rotation in degrees (clockwise) |
 | `openings[].pivotVertexId` | integer |  | Skylights on multi-plane roofs |
+| `openings[].owner` | string |  | Openings (Opening tool), Archicad 29+: move the opening into another host element |
+| `openings[].addCutElements` | any[] |  | Openings, Archicad 29+: also cut these elements |
+| `openings[].removeCutElements` | any[] |  | Openings, Archicad 29+: stop cutting these elements (not the owner) |
 | `openings[].bottomElevation` | number |  | Openings: bottom edge elevation above the home story (m) |
 | `openings[].anchorAltitude` | number |  | Openings: anchor point elevation above the home story (m) |
 | `openings[].shape` | "Rectangular" \\| "Circular" |  | Openings |
@@ -4289,7 +4293,7 @@ Deletes drawing elements from layouts (one undo step). The source views are not 
 
 ### `update_drawings`
 
-Refreshes placed drawings from their source views: pass drawing guids, layouts, or all: true. Archicad 26 has no direct update call, so the connector opens each affected layout (Archicad refreshes outdated auto-update drawings when a layout is shown), temporarily switching manual-update drawings to automatic (includeManual, default true). Returns per drawing statusBefore / statusAfter (UpToDate | Modified | Unknown) and counts. Publishing a set (publish_publisher_set) also updates the drawings it contains.
+Refreshes placed drawings from their source views: pass drawing guids, layouts, or all: true. Archicad 27+ updates them directly; Archicad 26 has no update call, so there the connector opens each affected layout (Archicad refreshes outdated auto-update drawings when a layout is shown), temporarily switching manual-update drawings to automatic (includeManual, default true). Returns per drawing statusBefore / statusAfter (UpToDate | Modified | Unknown) and counts. Publishing a set (publish_publisher_set) also updates the drawings it contains.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
