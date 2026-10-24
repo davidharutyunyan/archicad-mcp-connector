@@ -7,7 +7,7 @@ await t.ok("archicad_status", "archicad_status", {}, (j) => j.connected && j.con
 await t.ok("list_addon_commands", "list_addon_commands", {}, (j) => j.commands?.length > 100);
 await t.ok("get_supported_element_types", "get_supported_element_types", {}, (j) => j.types?.some((x: { type: string; create: boolean }) => x.type === "Wall" && x.create));
 await t.ok("get_connector_guide", "get_connector_guide", {}, (_j, r) => r.text.length > 500 || "guide too short");
-await t.ok("execute_json_api_command", "execute_json_api_command", { command: "API.GetProductInfo" }, (j) => j.version === 26);
+await t.ok("execute_json_api_command", "execute_json_api_command", { command: "API.GetProductInfo" }, (j) => j.version >= 26 && j.version <= 29);
 await t.ok("execute_addon_command", "execute_addon_command", { command: "Ping" }, (j) => j.ok === true);
 
 // --- walls

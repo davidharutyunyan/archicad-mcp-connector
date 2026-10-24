@@ -1,8 +1,9 @@
-import { LiveTest, guids } from "./lib.js";
+import { join } from "node:path";
+import { LiveTest, guids, testDir } from "./lib.js";
 import { existsSync, rmSync, mkdirSync, statSync } from "node:fs";
 
 const t = await new LiveTest("documentation").start();
-const D = "/private/tmp/claude-connector-tests/docs";
+const D = testDir("docs");
 rmSync(D, { recursive: true, force: true });
 mkdirSync(D, { recursive: true });
 const X = 600;
@@ -23,7 +24,8 @@ const pd = await t.ok("place_drawing floor plan", "place_drawing", { drawings: [
 ] });
 const drawingGuid = guids(pd)[0];
 await t.ok("get_layout_drawings", "get_layout_drawings", { layouts: ["LT Layout"] }, (j) => JSON.stringify(j).includes(drawingGuid ?? "none") || JSON.stringify(j).slice(0, 300));
-await t.ok("database+story places the story's own plan view", "get_layout_drawings", { layouts: ["LT Layout"] }, (j) => JSON.stringify(j).includes("1-й этаж") || JSON.stringify(j).slice(0, 400));
+const story0 = (views?.stories ?? []).find((s: { index?: number }) => s.index === 0)?.name ?? "1-й этаж";
+await t.ok("database+story places the story's own plan view", "get_layout_drawings", { layouts: ["LT Layout"] }, (j) => JSON.stringify(j).includes(story0) || JSON.stringify(j).slice(0, 400));
 if (drawingGuid) await t.ok("modify_drawings scale", "modify_drawings", { drawings: [{ guid: drawingGuid, scale: 50, name: "LT Plan" }] });
 
 // Anchored placement moves the content AND the frame (the drawing title follows the frame), and repositioning keeps an
@@ -64,22 +66,22 @@ if (planView) {
       `before ${JSON.stringify(planBefore?.layerCombination)} 1:${planBefore?.drawingScale}, after ${JSON.stringify(j.layerCombination)} 1:${j.drawingScale}`);
 }
 await t.ok("update_drawings", "update_drawings", { all: true });
-await t.ok("export_pdf layout", "export_pdf", { path: `${D}/layout.pdf`, layout: layoutDb?.guid ?? "LT Layout" }, () => existsSync(`${D}/layout.pdf`) && statSync(`${D}/layout.pdf`).size > 1000 || "pdf missing");
-await t.ok("export_pdf floor plan", "export_pdf", { path: `${D}/plan.pdf`, storyIndex: 0 }, () => existsSync(`${D}/plan.pdf`) || "pdf missing");
+await t.ok("export_pdf layout", "export_pdf", { path: join(D, "layout.pdf"), layout: layoutDb?.guid ?? "LT Layout" }, () => existsSync(join(D, "layout.pdf")) && statSync(join(D, "layout.pdf")).size > 1000 || "pdf missing");
+await t.ok("export_pdf floor plan", "export_pdf", { path: join(D, "plan.pdf"), storyIndex: 0 }, () => existsSync(join(D, "plan.pdf")) || "pdf missing");
 await t.ok("get_ifc_translators", "get_ifc_translators", {});
-await t.ok("export_ifc", "export_ifc", { path: `${D}/model.ifc` }, () => existsSync(`${D}/model.ifc`) && statSync(`${D}/model.ifc`).size > 10000 || "ifc missing");
-await t.ok("export_ifc elements", "export_ifc", { path: `${D}/walls.ifc`, scope: "Elements", elements: guids(w) }, () => existsSync(`${D}/walls.ifc`) || "ifc missing");
-await t.ok("export_dwg (dxf) floor plan", "export_dwg", { path: `${D}/plan.dxf`, format: "dxf", storyIndex: 0 }, () => existsSync(`${D}/plan.dxf`) || "dxf missing");
-await t.ok("export_3d_model obj", "export_3d_model", { path: `${D}/walls.obj`, format: "obj", elements: guids(w) }, () => existsSync(`${D}/walls.obj`) || "obj missing");
-await t.ok("export_3d_model stl", "export_3d_model", { path: `${D}/walls.stl`, format: "stl", elements: guids(w) }, () => existsSync(`${D}/walls.stl`) || "stl missing");
-await t.ok("export_module", "export_module", { path: `${D}/walls.mod`, elements: guids(w) }, () => existsSync(`${D}/walls.mod`) || "mod missing");
-await t.ok("merge_file module", "merge_file", { path: `${D}/walls.mod`, position: { x: 20, y: 0 } });
-const ph = await t.ok("place_hotlink", "place_hotlink", { hotlinks: [{ source: `${D}/walls.mod`, position: { x: X, y: 20 } }] });
+await t.ok("export_ifc", "export_ifc", { path: join(D, "model.ifc") }, () => existsSync(join(D, "model.ifc")) && statSync(join(D, "model.ifc")).size > 10000 || "ifc missing");
+await t.ok("export_ifc elements", "export_ifc", { path: join(D, "walls.ifc"), scope: "Elements", elements: guids(w) }, () => existsSync(join(D, "walls.ifc")) || "ifc missing");
+await t.ok("export_dwg (dxf) floor plan", "export_dwg", { path: join(D, "plan.dxf"), format: "dxf", storyIndex: 0 }, () => existsSync(join(D, "plan.dxf")) || "dxf missing");
+await t.ok("export_3d_model obj", "export_3d_model", { path: join(D, "walls.obj"), format: "obj", elements: guids(w) }, () => existsSync(join(D, "walls.obj")) || "obj missing");
+await t.ok("export_3d_model stl", "export_3d_model", { path: join(D, "walls.stl"), format: "stl", elements: guids(w) }, () => existsSync(join(D, "walls.stl")) || "stl missing");
+await t.ok("export_module", "export_module", { path: join(D, "walls.mod"), elements: guids(w) }, () => existsSync(join(D, "walls.mod")) || "mod missing");
+await t.ok("merge_file module", "merge_file", { path: join(D, "walls.mod"), position: { x: 20, y: 0 } });
+const ph = await t.ok("place_hotlink", "place_hotlink", { hotlinks: [{ source: join(D, "walls.mod"), position: { x: X, y: 20 } }] });
 const hl = await t.ok("get_hotlinks", "get_hotlinks", { includeInstances: true }, (j) => JSON.stringify(j).includes("walls") || JSON.stringify(j).slice(0, 300));
 await t.ok("update_hotlinks", "update_hotlinks", { all: true });
 const sets = await t.ok("get_publisher_sets", "get_publisher_sets", {});
 const setName = sets?.publisherSets?.[1] ?? sets?.publisherSets?.[0];
 console.log(`    publisher sets: ${JSON.stringify(sets).slice(0, 200)}`);
-if (setName) await t.ok("publish_publisher_set", "publish_publisher_set", { name: setName, outputPath: `${D}/published`, createFolders: true });
+if (setName) await t.ok("publish_publisher_set", "publish_publisher_set", { name: setName, outputPath: join(D, "published"), createFolders: true });
 if (drawingGuid) await t.ok("delete_drawings", "delete_drawings", { drawings: [drawingGuid] });
 await t.finish();

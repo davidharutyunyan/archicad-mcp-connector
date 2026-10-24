@@ -4,7 +4,9 @@ const t = await new LiveTest("attributes").start();
 const P = "LT-attr-";
 
 for (const type of ["Pen", "Layer", "Line", "Fill", "Composite", "Surface", "LayerCombination", "ZoneCategory", "Profile", "PenTable", "DimensionStandard", "ModelViewOption", "MEPSystem", "OperationProfile", "BuildingMaterial", "Font"]) {
-  await t.ok(`get_attributes ${type}`, "get_attributes", { type, limit: 3, detailed: true }, (j) => (j.attributes?.length ?? j.items?.length ?? 0) > 0 || `no items: ${JSON.stringify(j).slice(0, 200)}`);
+  // Archicad 29 replaced the MEP System attributes by the MEP API's system groups: none are left as attributes.
+  const mayBeEmpty = type === "MEPSystem" && t.version >= 29;
+  await t.ok(`get_attributes ${type}`, "get_attributes", { type, limit: 3, detailed: true }, (j) => mayBeEmpty || (j.attributes?.length ?? j.items?.length ?? 0) > 0 || `no items: ${JSON.stringify(j).slice(0, 200)}`);
 }
 const bm = await t.ok("get_attributes BuildingMaterial names", "get_attributes", { type: "BuildingMaterial", limit: 2 });
 const bmName = (bm?.attributes ?? bm?.items)?.[0]?.name;

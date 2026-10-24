@@ -30,9 +30,19 @@ await t.ok("modify_property_definitions add enum", "modify_property_definitions"
 await t.ok("get_attribute_property_values", "get_attribute_property_values", { attributes: [{ type: "BuildingMaterial", attribute: 1 }] });
 // IFC
 await t.ok("get_ifc_data", "get_ifc_data", { elements: [wg[0]], include: ["identity", "type", "properties"] }, (j) => JSON.stringify(j).match(/GlobalId|globalId|ifcGuid/i) !== null || JSON.stringify(j).slice(0, 300));
-await t.ok("set_ifc_properties", "set_ifc_properties", { properties: [{ elements: [wg[0]], propertySet: "Pset_LiveTest", name: "Note", value: "ok" }] });
-const ifc2 = await t.ok("read ifc property", "get_ifc_data", { elements: [wg[0]], include: ["properties"], propertySets: ["Pset_LiveTest"] });
-t.check("ifc property stored", JSON.stringify(ifc2).includes("Pset_LiveTest"), JSON.stringify(ifc2).slice(0, 300));
+const ifcProperty = { properties: [{ elements: [wg[0]], propertySet: "Pset_LiveTest", name: "Note", value: "ok" }] };
+if (t.version >= 29) {
+  // Archicad 29 removed the C API that stored IFC data on elements.
+  await t.fails("set_ifc_properties not supported", "set_ifc_properties", ifcProperty, /Archicad 29 removed/);
+  const id = await t.ok("ifc identity", "get_ifc_data", { elements: [wg[0]], include: ["identity", "type"] });
+  const e = id?.elements?.[0];
+  t.check("ifc GlobalId decodes to the element GUID", e?.archicadIfcId === wg[0] && /^[0-3][0-9A-Za-z_$]{21}$/.test(e?.ifcGlobalId ?? ""), JSON.stringify(e));
+  await t.ok("find by ifc GlobalId", "get_ifc_data", { ifcGlobalIds: [e?.ifcGlobalId ?? ""], include: ["type"] }, (j) => j.lookup?.[0]?.elements?.[0] === wg[0] || JSON.stringify(j).slice(0, 300));
+} else {
+  await t.ok("set_ifc_properties", "set_ifc_properties", ifcProperty);
+  const ifc2 = await t.ok("read ifc property", "get_ifc_data", { elements: [wg[0]], include: ["properties"], propertySets: ["Pset_LiveTest"] });
+  t.check("ifc property stored", JSON.stringify(ifc2).includes("Pset_LiveTest"), JSON.stringify(ifc2).slice(0, 300));
+}
 // classifications
 await t.ok("get_classification_systems", "get_classification_systems", { includeItemCounts: true });
 await t.ok("create_classification_system", "create_classification_system", { name: "LT Class", editionVersion: "1.0", items: [{ id: "LT-1", name: "Walls", children: [{ id: "LT-1.1", name: "Exterior walls" }] }] });
