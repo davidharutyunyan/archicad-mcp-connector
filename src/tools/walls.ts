@@ -14,7 +14,14 @@ export const WallFields = {
   begin: Point2D.describe("Start point of the wall reference line"),
   end: Point2D.describe("End point of the wall reference line"),
   height: z.number().positive().optional().describe("Height in m. Giving a height unlinks the wall top unless topLinkedStory is also given"),
-  thickness: z.number().positive().optional().describe("Thickness in m (ignored for composite walls: the composite defines it)"),
+  thickness: z
+    .number()
+    .positive()
+    .optional()
+    .describe(
+      "Thickness in m. A composite defines its own thickness: with 'composite' this is ignored; without composite/buildingMaterial/profile " +
+        "it makes a Composite/Profile wall (e.g. the template default) Basic, keeping its building material",
+    ),
   endThickness: z.number().positive().optional().describe("Thickness at the end point; makes a trapezoid wall"),
   bottomOffset: z.number().optional().describe("Bottom elevation relative to the home story level (m); the wall then spans bottomOffset .. bottomOffset + height"),
   topLinkedStory: z.number().int().min(0).optional().describe("Link the top to the story N levels above the home story (0 = unlinked, use height)"),
