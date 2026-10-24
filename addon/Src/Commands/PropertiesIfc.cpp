@@ -19,10 +19,135 @@
 
 #include <cmath>
 
+#if CC_AC_VERSION >= 28
+#include "ACAPI/IFCAttribute.hpp"
+#include "ACAPI/IFCClassificationReference.hpp"
+#include "ACAPI/IFCObjectAccessor.hpp"
+#include "ACAPI/IFCObjectID.hpp"
+#include "ACAPI/IFCProperty.hpp"
+#include "ACAPI/IFCPropertyAccessor.hpp"
+
+#include <cstdio>
+#include <cstring>
+#include <unordered_set>
+#include <variant>
+#endif
+
 namespace cc {
 namespace props {
 
 namespace {
+
+bool Includes (const GS::Array<GS::UniString>& include, const char* what)
+{
+	if (include.IsEmpty ())
+		return true;
+	for (const GS::UniString& s : include)
+		if (EqualsIgnoreCase (s, what))
+			return true;
+	return false;
+}
+
+
+
+bool MatchesPropertySetFilter (const GS::Array<GS::UniString>& psetFilter, const GS::UniString& propertySetName)
+{
+	if (psetFilter.IsEmpty ())
+		return true;
+	for (const GS::UniString& f : psetFilter)
+		if (EqualsIgnoreCase (Trimmed (f), propertySetName))
+			return true;
+	return false;
+}
+
+#if CC_AC_VERSION >= 28
+
+GS::UniString ApiErrorText (const ACAPI::Error& e)
+{
+	return GS::UniString (e.text.c_str (), CC_UTF8);
+}
+
+// --- IFC GlobalId <-> GUID ---------------------------------------------------------------------------
+// The 22-character IFC GlobalId is the 128-bit GUID in base 64 (2 + 21 x 6 bits), the conversion
+// ACAPI_IFC_IFCGuidToAPIGuid / ACAPI_IFC_APIGuidToIFCGuid did before Archicad 29.
+
+const char kIfcGuidDigits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+
+
+bool IfcGlobalIdToGuid (const GS::UniString& ifcId, API_Guid& guid)
+{
+	const GS::String chars (ifcId.ToCStr (0, MaxUSize, CC_UTF8).Get ());
+	if (chars.GetLength () != 22)
+		return false;
+	UInt64 hi = 0, lo = 0;
+	for (UIndex i = 0; i < 22; ++i) {
+		const char* digit = std::strchr (kIfcGuidDigits, chars[i]);
+		if (chars[i] == '\0' || digit == nullptr)
+			return false;
+		const UInt64 value = (UInt64) (digit - kIfcGuidDigits);
+		if (i == 0 && value > 3)
+			return false;
+		hi = (hi << 6) | (lo >> 58);
+		lo = (lo << 6) | value;
+	}
+	char text[40];
+	std::snprintf (text, sizeof (text), "%08llX-%04llX-%04llX-%04llX-%012llX",
+				   (unsigned long long) (hi >> 32), (unsigned long long) ((hi >> 16) & 0xFFFF), (unsigned long long) (hi & 0xFFFF),
+				   (unsigned long long) (lo >> 48), (unsigned long long) (lo & 0xFFFFFFFFFFFFULL));
+	GS::Guid gsGuid;
+	if (gsGuid.ConvertFromString (text) != NoError)
+		return false;
+	guid = GSGuid2APIGuid (gsGuid);
+	return true;
+}
+
+GS::UniString GuidToIfcGlobalId (const API_Guid& guid)
+{
+	const GS::String text (APIGuid2GSGuid (guid).ToUniString ().ToCStr ().Get ());
+	UInt64 hi = 0, lo = 0;
+	Int32 nibbles = 0;
+	for (UIndex i = 0; i < text.GetLength (); ++i) {
+		const char c = text[i];
+		if (c == '-')
+			continue;
+		const char* digit = std::strchr ("0123456789ABCDEF", std::toupper ((unsigned char) c));
+		if (c == '\0' || digit == nullptr)
+			return GS::UniString ();
+		const UInt64 value = (UInt64) (digit - "0123456789ABCDEF");
+		if (nibbles < 16)
+			hi = (hi << 4) | value;
+		else
+			lo = (lo << 4) | value;
+		++nibbles;
+	}
+	if (nibbles != 32)
+		return GS::UniString ();
+	char out[23];
+	for (Int32 i = 21; i >= 0; --i) {
+		out[i] = kIfcGuidDigits[lo & 0x3F];
+		lo = (lo >> 6) | ((hi & 0x3F) << 58);
+		hi >>= 6;
+	}
+	out[22] = '\0';
+	return GS::UniString (out);
+}
+
+
+IFCAPI::ObjectID MustObjectID (const API_Guid& guid)
+{
+	API_Elem_Head head;
+	BNZeroMemory (&head, sizeof (head));
+	head.guid = guid;
+	CheckWithHint (ACAPI_Element_GetHeader (&head), "Cannot read the element");
+	ACAPI::Result<IFCAPI::ObjectID> id = IFCAPI::GetObjectAccessor ().CreateElementObjectID (head);
+	if (id.IsErr ())
+		Fail ("The element has no IFC entity: " + ApiErrorText (id.UnwrapErr ()) + ".", id.UnwrapErr ().kind);
+	return std::move (id).Unwrap ();
+}
+
+#endif // CC_AC_VERSION >= 28
+
+#if CC_AC_VERSION < 29
 
 // --- Serialization ------------------------------------------------------------------------------
 
@@ -150,21 +275,14 @@ OS IfcClassificationReferenceJson (const API_IFCClassificationReference& r)
 
 GS::UniString IfcGuidString (const API_Guid& guid)
 {
+#if CC_AC_VERSION >= 28
+	return GuidToIfcGlobalId (guid);
+#else
 	GS::UniString s;
 	if (ACAPI_IFC_APIGuidToIFCGuid (guid, s) != NoError)
 		return GS::UniString ();
 	return s;
-}
-
-
-bool Includes (const GS::Array<GS::UniString>& include, const char* what)
-{
-	if (include.IsEmpty ())
-		return true;
-	for (const GS::UniString& s : include)
-		if (EqualsIgnoreCase (s, what))
-			return true;
-	return false;
+#endif
 }
 
 
@@ -191,7 +309,20 @@ OS IfcDataOfElement (const API_Guid& guid, const GS::Array<GS::UniString>& inclu
 
 	if (Includes (include, "type")) {
 		GS::UniString ifcType, typeObjectType;
+#if CC_AC_VERSION >= 28
+		const IFCAPI::ObjectAccessor objects = IFCAPI::GetObjectAccessor ();
+		const IFCAPI::ObjectID objectID = MustObjectID (guid);
+		const ACAPI::Result<IFCAPI::IFCType> type = objects.GetIFCType (objectID);
+		const GSErrCode err = type.IsOk () ? NoError : type.UnwrapErr ().kind;
+		if (type.IsOk ()) {
+			ifcType = *type;
+			const ACAPI::Result<IFCAPI::IFCType> typeObject = objects.GetTypeObjectIFCType (objectID);
+			if (typeObject.IsOk ())
+				typeObjectType = *typeObject;
+		}
+#else
 		const GSErrCode err = ACAPI_Element_GetIFCType (guid, &ifcType, &typeObjectType);
+#endif
 		if (err == NoError) {
 			out.Add ("ifcType", ifcType);
 			if (!typeObjectType.IsEmpty ())
@@ -207,15 +338,8 @@ OS IfcDataOfElement (const API_Guid& guid, const GS::Array<GS::UniString>& inclu
 		if (err == NoError) {
 			GS::Array<OS> list;
 			for (const API_IFCProperty& p : properties) {
-				if (!psetFilter.IsEmpty ()) {
-					bool match = false;
-					for (const GS::UniString& f : psetFilter)
-						if (EqualsIgnoreCase (Trimmed (f), p.head.propertySetName))
-							match = true;
-					if (!match)
-						continue;
-				}
-				list.Push (IfcPropertyJson (p));
+				if (MatchesPropertySetFilter (psetFilter, p.head.propertySetName))
+					list.Push (IfcPropertyJson (p));
 			}
 			out.Add ("properties", list);
 		} else {
@@ -251,6 +375,100 @@ OS IfcDataOfElement (const API_Guid& guid, const GS::Array<GS::UniString>& inclu
 	return out;
 }
 
+// Elements whose Archicad or external (imported) IFC GlobalId is ifcId; false if ifcId is not a valid IFC GlobalId.
+bool FindByIfcGlobalId (const GS::UniString& ifcId, GS::Array<API_Guid>& found)
+{
+	API_Guid apiGuid = APINULLGuid;
+#if CC_AC_VERSION >= 28
+	if (!IfcGlobalIdToGuid (ifcId, apiGuid) || apiGuid == APINULLGuid)
+		return false;
+#else
+	if (ACAPI_IFC_IFCGuidToAPIGuid (ifcId, apiGuid) != NoError || apiGuid == APINULLGuid)
+		return false;
+#endif
+	GS::Array<API_Guid> byArchicadId, byExternalId;
+	if (ACAPI_Element_GetElemListByIFCIdentifier (&apiGuid, nullptr, byArchicadId) == NoError)
+		found.Append (byArchicadId);
+	if (ACAPI_Element_GetElemListByIFCIdentifier (nullptr, &apiGuid, byExternalId) == NoError)
+		for (const API_Guid& g : byExternalId)
+			if (!found.Contains (g))
+				found.Push (g);
+	return true;
+}
+
+#if CC_AC_VERSION >= 28
+// --- IFC value types -----------------------------------------------------------------------------
+// Underlying primitive of an IFC defined type (IFC4 schema), what ACAPI_Element_GetIFCPropertyValuePrimitiveType
+// answered before Archicad 28 (used on Archicad 28, which still stores IFC properties). Measures not listed are real numbers.
+
+struct IfcValueTypeInfo {
+	const char*							name;
+	API_IFCPropertyValuePrimitiveType	primitive;
+};
+
+const IfcValueTypeInfo kIfcValueTypes[] = {
+	{ "IfcBoolean",					API_IFCPropertyAnyValueBooleanType },
+	{ "IfcLogical",					API_IFCPropertyAnyValueLogicalType },
+	{ "IfcInteger",					API_IFCPropertyAnyValueIntegerType },
+	{ "IfcPositiveInteger",			API_IFCPropertyAnyValueIntegerType },
+	{ "IfcTimeStamp",				API_IFCPropertyAnyValueIntegerType },
+	{ "IfcDayInMonthNumber",		API_IFCPropertyAnyValueIntegerType },
+	{ "IfcDayInWeekNumber",			API_IFCPropertyAnyValueIntegerType },
+	{ "IfcMonthInYearNumber",		API_IFCPropertyAnyValueIntegerType },
+	{ "IfcYearNumber",				API_IFCPropertyAnyValueIntegerType },
+	{ "IfcHourInDay",				API_IFCPropertyAnyValueIntegerType },
+	{ "IfcMinuteInHour",			API_IFCPropertyAnyValueIntegerType },
+	{ "IfcDimensionCount",			API_IFCPropertyAnyValueIntegerType },
+	{ "IfcCardinalPointReference",	API_IFCPropertyAnyValueIntegerType },
+	{ "IfcReal",					API_IFCPropertyAnyValueRealType },
+	{ "IfcParameterValue",			API_IFCPropertyAnyValueRealType },
+	{ "IfcSecondInMinute",			API_IFCPropertyAnyValueRealType },
+	{ "IfcSpecularExponent",		API_IFCPropertyAnyValueRealType },
+	{ "IfcSpecularRoughness",		API_IFCPropertyAnyValueRealType },
+	{ "IfcLabel",					API_IFCPropertyAnyValueStringType },
+	{ "IfcText",					API_IFCPropertyAnyValueStringType },
+	{ "IfcIdentifier",				API_IFCPropertyAnyValueStringType },
+	{ "IfcDescriptiveMeasure",		API_IFCPropertyAnyValueStringType },
+	{ "IfcDate",					API_IFCPropertyAnyValueStringType },
+	{ "IfcDateTime",				API_IFCPropertyAnyValueStringType },
+	{ "IfcTime",					API_IFCPropertyAnyValueStringType },
+	{ "IfcDuration",				API_IFCPropertyAnyValueStringType },
+	{ "IfcURIReference",			API_IFCPropertyAnyValueStringType },
+	{ "IfcGloballyUniqueId",		API_IFCPropertyAnyValueStringType },
+	{ "IfcLanguageId",				API_IFCPropertyAnyValueStringType },
+	{ "IfcPresentableText",			API_IFCPropertyAnyValueStringType },
+	{ "IfcBoxAlignment",			API_IFCPropertyAnyValueStringType },
+	{ "IfcFontStyle",				API_IFCPropertyAnyValueStringType },
+	{ "IfcFontVariant",				API_IFCPropertyAnyValueStringType },
+	{ "IfcFontWeight",				API_IFCPropertyAnyValueStringType },
+	{ "IfcTextAlignment",			API_IFCPropertyAnyValueStringType },
+	{ "IfcTextDecoration",			API_IFCPropertyAnyValueStringType },
+	{ "IfcTextFontName",			API_IFCPropertyAnyValueStringType },
+	{ "IfcTextTransformation",		API_IFCPropertyAnyValueStringType },
+	{ "IfcWellKnownTextLiteral",	API_IFCPropertyAnyValueStringType },
+};
+
+
+// Canonical name and primitive of an IFC value type name; false for an unknown name.
+bool IfcPrimitiveTypeOf (GS::UniString& valueType, API_IFCPropertyValuePrimitiveType& primitive)
+{
+	for (const IfcValueTypeInfo& t : kIfcValueTypes) {
+		if (EqualsIgnoreCase (valueType, t.name)) {
+			valueType = t.name;
+			primitive = t.primitive;
+			return true;
+		}
+	}
+	const bool measure = valueType.GetLength () > 10 && EqualsIgnoreCase (valueType.GetPrefix (3), "Ifc") &&
+						 EqualsIgnoreCase (valueType.GetSuffix (7), "Measure") && valueType != "IfcCompoundPlaneAngleMeasure";
+	if (!measure)
+		return false;
+	primitive = API_IFCPropertyAnyValueRealType;
+	return true;
+}
+
+#endif // CC_AC_VERSION >= 28
+
 // --- Parsing ----------------------------------------------------------------------------------------
 
 const char* const kIfcTypeHint =
@@ -283,8 +501,14 @@ API_IFCPropertyValue BuildIfcValue (const JScalar& jIn, const GS::UniString& def
 	v.value.doubleValue = 0.0;
 	v.value.boolValue = false;
 	API_IFCPropertyValuePrimitiveType primitive = API_IFCPropertyAnyValueStringType;
+#if CC_AC_VERSION >= 28
+	if (!IfcPrimitiveTypeOf (valueType, primitive))
+		Fail (what + ": unknown IFC value type '" + valueType + "'. " + kIfcTypeHint);
+	v.valueType = valueType;
+#else
 	if (ACAPI_Element_GetIFCPropertyValuePrimitiveType (valueType, &primitive) != NoError)
 		Fail (what + ": unknown IFC value type '" + valueType + "'. " + kIfcTypeHint);
+#endif
 	v.value.primitiveType = primitive;
 
 	switch (primitive) {
@@ -662,6 +886,216 @@ OS SetIfcClassificationReferenceEntry (const OS& spec)
 	});
 }
 
+#else // Archicad 29+: IFCAPI (read only; the functions that stored IFC data on elements were removed)
+
+// --- Serialization ------------------------------------------------------------------------------
+
+void AddIfcAnyValue (OS& out, const char* key, const IFCAPI::AnyValue& v)
+{
+	if (!v.has_value ())
+		return;
+	std::visit ([&] (const auto& value) {
+		using T = std::decay_t<decltype (value)>;
+		if constexpr (std::is_same_v<T, IFCAPI::IfcLogical>) {
+			if (value == IFCAPI::IfcLogical::Unknown)
+				out.Add (key, GS::UniString ("UNKNOWN"));
+			else
+				out.Add (key, value == IFCAPI::IfcLogical::True);
+		} else {
+			out.Add (key, value);
+		}
+	}, *v);
+}
+
+
+OS IfcValueJson (const IFCAPI::Value& v)
+{
+	OS out;
+	AddIfcAnyValue (out, "value", v.GetAnyValue ());
+	out.Add ("valueType", v.GetType ());
+	return out;
+}
+
+
+GS::Array<OS> IfcValuesJson (const std::vector<IFCAPI::Value>& values)
+{
+	GS::Array<OS> list;
+	for (const IFCAPI::Value& v : values)
+		list.Push (IfcValueJson (v));
+	return list;
+}
+
+
+OS IfcPropertyJson (const IFCAPI::Property& p)
+{
+	OS out ("propertySet", p.GetPropertySetName (), "name", p.GetName ());
+	const IFCAPI::PropertyByType typed = p.GetTyped ();
+	if (const auto* single = std::get_if<IFCAPI::PropertySingleValue> (&typed)) {
+		const IFCAPI::Value value = single->GetNominalValue ();
+		out.Add ("type", GS::UniString ("Single"));
+		AddIfcAnyValue (out, "value", value.GetAnyValue ());
+		out.Add ("valueType", value.GetType ());
+	} else if (const auto* list = std::get_if<IFCAPI::PropertyListValue> (&typed)) {
+		out.Add ("type", GS::UniString ("List"));
+		out.Add ("values", IfcValuesJson (list->GetListValues ()));
+	} else if (const auto* bounded = std::get_if<IFCAPI::PropertyBoundedValue> (&typed)) {
+		out.Add ("type", GS::UniString ("Bounded"));
+		const std::pair<const char*, IFCAPI::Value> bounds[] = {
+			{ "lower", bounded->GetLowerBoundValue () }, { "upper", bounded->GetUpperBoundValue () }, { "setPoint", bounded->GetSetPointValue () },
+		};
+		for (const auto& [key, value] : bounds)
+			if (!value.GetType ().IsEmpty ())
+				out.Add (key, IfcValueJson (value));
+	} else if (const auto* enumerated = std::get_if<IFCAPI::PropertyEnumeratedValue> (&typed)) {
+		out.Add ("type", GS::UniString ("Enumerated"));
+		out.Add ("values", IfcValuesJson (enumerated->GetEnumerationValues ()));
+		out.Add ("options", IfcValuesJson (enumerated->GetEnumerationReference ()));
+	} else if (const auto* table = std::get_if<IFCAPI::PropertyTableValue> (&typed)) {
+		out.Add ("type", GS::UniString ("Table"));
+		out.Add ("definingValues", IfcValuesJson (table->GetDefiningValues ()));
+		out.Add ("definedValues", IfcValuesJson (table->GetDefinedValues ()));
+	}
+	return out;
+}
+
+
+OS IfcAttributeJson (const IFCAPI::Attribute& a)
+{
+	OS out ("name", a.GetName (), "type", a.GetValueType ());
+	if (const std::optional<GS::UniString> value = a.GetValue ())
+		out.Add ("value", *value);
+	else
+		out.Add ("hasValue", false);
+	return out;
+}
+
+
+void AddOptional (OS& out, const char* key, const std::optional<GS::UniString>& value)
+{
+	if (value.has_value () && !value->IsEmpty ())
+		out.Add (key, *value);
+}
+
+
+OS IfcClassificationReferenceJson (const IFCAPI::ClassificationReference& r)
+{
+	OS out ("referenceName", r.GetIfcRelAssociatesClassificationName ());
+	AddOptional (out, "identification", r.GetIdentification ());
+	AddOptional (out, "name", r.GetName ());
+	AddOptional (out, "location", r.GetLocation ());
+	AddOptional (out, "description", r.GetDescription ());
+	AddOptional (out, "sort", r.GetSort ());
+	const IFCAPI::Classification c = r.GetReferencedSource ();
+	OS source ("name", c.GetName ());
+	AddOptional (source, "source", c.GetSource ());
+	AddOptional (source, "edition", c.GetEdition ());
+	AddOptional (source, "editionDate", c.GetEditionDate ());
+	AddOptional (source, "description", c.GetDescription ());
+	AddOptional (source, "location", c.GetLocation ());
+	out.Add ("source", source);
+	return out;
+}
+
+OS IfcDataOfElement (const API_Guid& guid, const GS::Array<GS::UniString>& include, const GS::Array<GS::UniString>& psetFilter, bool storedOnly)
+{
+	if (!ElementExists (guid))
+		Fail ("Element " + GuidStr (guid) + " does not exist.", APIERR_BADID);
+	OS out ("guid", GuidStr (guid));
+	const IFCAPI::ObjectID objectID = MustObjectID (guid);
+	const IFCAPI::ObjectAccessor objects = IFCAPI::GetObjectAccessor ();
+	const IFCAPI::PropertyAccessor accessor (objectID);
+
+	if (Includes (include, "identity")) {
+		const ACAPI::Result<IFCAPI::IfcGloballyUniqueId> globalId = objects.GetGlobalId (objectID);
+		if (globalId.IsOk ()) {
+			out.Add ("ifcGlobalId", *globalId);
+			API_Guid archicadId = APINULLGuid;
+			if (IfcGlobalIdToGuid (*globalId, archicadId))
+				out.Add ("archicadIfcId", GuidStr (archicadId));
+			const ACAPI::Result<IFCAPI::IfcGloballyUniqueId> externalId = objects.GetExternalGlobalId (objectID);
+			if (externalId.IsOk () && !externalId->IsEmpty ()) {
+				out.Add ("externalIfcGlobalId", *externalId);
+				API_Guid external = APINULLGuid;
+				if (IfcGlobalIdToGuid (*externalId, external))
+					out.Add ("externalIfcId", GuidStr (external));
+			}
+		} else {
+			out.Add ("identityError", ErrorName (globalId.UnwrapErr ().kind));
+		}
+	}
+
+	if (Includes (include, "type")) {
+		const ACAPI::Result<IFCAPI::IFCType> ifcType = objects.GetIFCType (objectID);
+		if (ifcType.IsOk ()) {
+			out.Add ("ifcType", *ifcType);
+			const ACAPI::Result<IFCAPI::IFCType> typeObjectType = objects.GetTypeObjectIFCType (objectID);
+			if (typeObjectType.IsOk () && !typeObjectType->IsEmpty ())
+				out.Add ("typeObjectIfcType", *typeObjectType);
+		} else {
+			out.Add ("typeError", ErrorName (ifcType.UnwrapErr ().kind));
+		}
+	}
+
+	if (Includes (include, "properties")) {
+		const ACAPI::Result<std::vector<IFCAPI::Property>> properties = storedOnly ? accessor.GetLocalProperties () : accessor.GetPreviewProperties ();
+		if (properties.IsOk ()) {
+			GS::Array<OS> list;
+			for (const IFCAPI::Property& p : *properties)
+				if (MatchesPropertySetFilter (psetFilter, p.GetPropertySetName ()))
+					list.Push (IfcPropertyJson (p));
+			out.Add ("properties", list);
+		} else {
+			out.Add ("propertiesError", ErrorName (properties.UnwrapErr ().kind));
+		}
+	}
+
+	if (Includes (include, "attributes")) {
+		const ACAPI::Result<std::vector<IFCAPI::Attribute>> attributes = accessor.GetAttributes ();
+		if (attributes.IsOk ()) {
+			GS::Array<OS> list;
+			for (const IFCAPI::Attribute& a : *attributes)
+				list.Push (IfcAttributeJson (a));
+			out.Add ("attributes", list);
+		} else {
+			out.Add ("attributesError", ErrorName (attributes.UnwrapErr ().kind));
+		}
+	}
+
+	if (Includes (include, "classificationReferences")) {
+		const ACAPI::Result<std::vector<IFCAPI::ClassificationReference>> refs =
+			storedOnly ? accessor.GetLocalClassificationReferences () : accessor.GetPreviewClassificationReferences ();
+		if (refs.IsOk ()) {
+			GS::Array<OS> list;
+			for (const IFCAPI::ClassificationReference& r : *refs)
+				list.Push (IfcClassificationReferenceJson (r));
+			out.Add ("classificationReferences", list);
+		} else {
+			out.Add ("classificationReferencesError", ErrorName (refs.UnwrapErr ().kind));
+		}
+	}
+	return out;
+}
+
+
+bool FindByIfcGlobalId (const GS::UniString& ifcId, GS::Array<API_Guid>& found)
+{
+	API_Guid unused;
+	if (!IfcGlobalIdToGuid (ifcId, unused))
+		return false;
+	const IFCAPI::ObjectAccessor objects = IFCAPI::GetObjectAccessor ();
+	const ACAPI::Result<std::unordered_set<IFCAPI::ObjectID>> ids = objects.FindElementsByGlobalId (ifcId);
+	if (ids.IsErr ())
+		Fail ("Cannot search elements by IFC GlobalId: " + ApiErrorText (ids.UnwrapErr ()) + ".", ids.UnwrapErr ().kind);
+	for (const IFCAPI::ObjectID& id : *ids) {
+		const ACAPI::Result<API_Guid> guid = objects.GetAPIElementID (id);
+		if (guid.IsOk () && !found.Contains (*guid))
+			found.Push (*guid);
+	}
+	return true;
+}
+
+#endif // CC_AC_VERSION < 29
+
 } // namespace
 
 
@@ -690,21 +1124,13 @@ void RegisterIfcCommands ()
 			GS::Array<OS> lookup;
 			for (const GS::UniString& ifcId : GetStringArray (params, "ifcGlobalIds", false)) {
 				OS entry ("ifcGlobalId", ifcId);
-				API_Guid apiGuid = APINULLGuid;
-				if (ACAPI_IFC_IFCGuidToAPIGuid (Trimmed (ifcId), apiGuid) != NoError || apiGuid == APINULLGuid) {
+				GS::Array<API_Guid> found;
+				if (!FindByIfcGlobalId (Trimmed (ifcId), found)) {
 					entry.Add ("error", OS ("code", (Int32) APIERR_BADPARS, "message",
 											GS::UniString ("Invalid IFC GlobalId (expected the 22-character IFC GUID, e.g. 2Hn3tQ$Pz0Hwv2k1cA7t2W).")));
 					lookup.Push (entry);
 					continue;
 				}
-				GS::Array<API_Guid> found;
-				GS::Array<API_Guid> byArchicadId, byExternalId;
-				if (ACAPI_Element_GetElemListByIFCIdentifier (&apiGuid, nullptr, byArchicadId) == NoError)
-					found.Append (byArchicadId);
-				if (ACAPI_Element_GetElemListByIFCIdentifier (nullptr, &apiGuid, byExternalId) == NoError)
-					for (const API_Guid& g : byExternalId)
-						if (!found.Contains (g))
-							found.Push (g);
 				GS::Array<GS::UniString> guids;
 				for (const API_Guid& g : found) {
 					guids.Push (GuidStr (g));
@@ -741,6 +1167,12 @@ void RegisterIfcCommands ()
 		"referenceName? (key; default identification or name), identification?, name?, location?, source: {name, source?, edition?, "
 		"editionDate?, description?, location?}, remove?: true}]}.",
 		[] (const OS& params) -> OS {
+#if CC_AC_VERSION >= 29
+			(void) params;
+			Fail ("Archicad 29 removed the API that stores IFC properties, attributes and classification references on elements "
+				  "(GetIfcData still reads them). Store the data as Archicad properties or classifications (set_property_values, "
+				  "set_element_classifications) and map them in the IFC translator instead.", APIERR_NOTSUPPORTED);
+#else
 			const GS::Array<OS> properties = GetObjectArray (params, "properties", false);
 			const GS::Array<OS> attributes = GetObjectArray (params, "attributes", false);
 			const GS::Array<OS> references = GetObjectArray (params, "classificationReferences", false);
@@ -765,6 +1197,7 @@ void RegisterIfcCommands ()
 			if (!references.IsEmpty ())
 				out.Add ("classificationReferences", referenceResults);
 			return out;
+#endif
 		});
 }
 
